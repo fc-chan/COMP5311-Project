@@ -83,11 +83,33 @@ The UI includes:
 
 - algorithm selector
 - scenario selector
+- local video upload for visual playback demonstration
+- side-by-side SODA vs baseline video showdown
 - start, pause, and reset controls
 - playback panel with timeline and status
 - live charts for throughput, bitrate, and buffer
 - chunk decision log
 - summary metrics using the paper-style utility/rebuffer/switching QoE
+
+## Local video demonstration
+
+To make the algorithm differences easier to present, the frontend supports a
+single local video upload that feeds both the main player and a synchronized
+side-by-side showdown:
+
+1. Open `http://localhost:8000/frontend/`
+2. Upload a local video from the `Local video preview` control
+3. Choose a trace
+4. Choose an algorithm
+5. Press `Start`
+
+The main playback panel follows the currently selected algorithm. The showdown
+panel keeps SODA on the left and places the selected non-SODA algorithm on the
+right so both panes replay the same local video under the same trace timing.
+If you leave the selector on SODA, the right lane stays in standby.
+The demo maps simulated bitrate decisions to visual quality degradation while
+freezing playback during rebuffer events. This is meant for presentation and
+intuition; it is not a full multi-rendition DASH playback stack.
 
 ## ABR algorithms
 

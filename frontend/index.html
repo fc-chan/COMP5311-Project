@@ -36,6 +36,18 @@
             <select id="scenario-select"></select>
           </label>
         </div>
+        <div class="upload-controls">
+          <label class="upload-label">
+            <span>Local video preview</span>
+            <input id="video-upload" type="file" accept="video/*">
+          </label>
+          <button id="clear-video-btn" class="btn" type="button">Remove Video</button>
+          <p class="upload-hint" id="upload-hint">
+            Upload one local video. The simulator will reuse the same source video for
+            the main player and the SODA-vs-baseline showdown, then map bitrate
+            decisions to visible quality changes and rebuffer freezes.
+          </p>
+        </div>
         <div class="controls">
           <button id="start-btn" class="btn btn-primary">Start</button>
           <button id="pause-btn" class="btn">Pause</button>
@@ -54,6 +66,17 @@
             <div class="status-pill" id="stall-indicator">Smooth</div>
           </div>
           <div class="screen">
+            <div class="video-preview" id="video-preview">
+              <video id="local-video" playsinline muted preload="metadata"></video>
+              <div class="video-empty-state" id="video-empty-state">
+                Upload a local video to turn SODA and baseline decisions into a visible playback demo.
+              </div>
+              <div class="video-quality-badge" id="video-quality-badge">No video loaded</div>
+              <div class="video-status-copy" id="video-status-copy">
+                The preview is muted and simulates quality layers from the selected bitrate rung.
+              </div>
+              <div class="video-stall-overlay" id="video-stall-overlay">Rebuffering</div>
+            </div>
             <div class="screen-overlay">
               <div class="screen-stat">
                 <span>Current bitrate</span>
@@ -90,6 +113,57 @@
         </div>
 
         <div class="metrics-grid" id="metrics-grid"></div>
+      </section>
+
+      <section class="showdown-card">
+        <div class="charts-header">
+          <div>
+            <p class="eyebrow">Side-by-Side Video Showdown</p>
+            <h2 id="showdown-title">SODA against the selected baseline</h2>
+          </div>
+          <p class="charts-copy" id="showdown-copy">
+            Upload one local video, then replay the same trace on both panes. The left lane stays on SODA and the right lane follows the selected algorithm.
+          </p>
+        </div>
+        <div class="showdown-grid">
+          <article class="showdown-lane">
+            <div class="showdown-lane-header">
+              <p class="eyebrow">Left lane</p>
+              <h3 id="compare-left-label">SODA (paper reproduction)</h3>
+            </div>
+            <div class="showdown-preview" id="compare-left-preview">
+              <video id="compare-left-video" playsinline muted preload="metadata"></video>
+              <div class="video-empty-state" id="compare-left-empty">
+                Upload a local video to start the side-by-side comparison.
+              </div>
+              <div class="video-quality-badge" id="compare-left-quality">No video loaded</div>
+              <div class="video-status-copy" id="compare-left-status">
+                SODA will stay in the left lane for every showdown.
+              </div>
+              <div class="video-stall-overlay" id="compare-left-stall">Rebuffering</div>
+            </div>
+            <div class="compare-summary-grid" id="compare-left-summary"></div>
+          </article>
+
+          <article class="showdown-lane">
+            <div class="showdown-lane-header">
+              <p class="eyebrow">Right lane</p>
+              <h3 id="compare-right-label">Selected algorithm</h3>
+            </div>
+            <div class="showdown-preview" id="compare-right-preview">
+              <video id="compare-right-video" playsinline muted preload="metadata"></video>
+              <div class="video-empty-state" id="compare-right-empty">
+                Select HYB-like, BOLA-like, or Greedy to place it against SODA.
+              </div>
+              <div class="video-quality-badge" id="compare-right-quality">Comparison waiting</div>
+              <div class="video-status-copy" id="compare-right-status">
+                The right lane becomes active when you choose a non-SODA algorithm.
+              </div>
+              <div class="video-stall-overlay" id="compare-right-stall">Rebuffering</div>
+            </div>
+            <div class="compare-summary-grid" id="compare-right-summary"></div>
+          </article>
+        </div>
       </section>
 
       <section class="comparison-card">

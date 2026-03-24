@@ -4,13 +4,35 @@ import { AbrSimulator, BITRATE_LADDER_MBPS, CHUNK_DURATION } from "./core/simula
 import { createMetricsTracker, formatSummaryMetrics } from "./core/metrics.js";
 import { loadTraceCatalog } from "./core/traces.js";
 
+const STEP_INTERVAL_MS = 650;
+const VISUAL_PLAYBACK_RATE = CHUNK_DURATION / (STEP_INTERVAL_MS / 1000);
+const BASELINE_SELECTION_HINT =
+  "Select HYB-like, BOLA-like, or Greedy to place it against SODA.";
+const QUALITY_LABELS = [
+  "240p-like",
+  "360p-like",
+  "480p-like",
+  "720p-like",
+  "900p-like",
+  "1080p-like",
+  "1440p-like",
+];
+
 const ui = {
   algorithmSelect: document.querySelector("#algorithm-select"),
   scenarioSelect: document.querySelector("#scenario-select"),
   startBtn: document.querySelector("#start-btn"),
   pauseBtn: document.querySelector("#pause-btn"),
   resetBtn: document.querySelector("#reset-btn"),
+  videoUpload: document.querySelector("#video-upload"),
+  clearVideoBtn: document.querySelector("#clear-video-btn"),
   scenarioDescription: document.querySelector("#scenario-description"),
+  showdownTitle: document.querySelector("#showdown-title"),
+  showdownCopy: document.querySelector("#showdown-copy"),
+  compareLeftLabel: document.querySelector("#compare-left-label"),
+  compareRightLabel: document.querySelector("#compare-right-label"),
+  compareLeftSummary: document.querySelector("#compare-left-summary"),
+  compareRightSummary: document.querySelector("#compare-right-summary"),
   comparisonTitle: document.querySelector("#comparison-title"),
   comparisonCopy: document.querySelector("#comparison-copy"),
   comparisonHighlights: document.querySelector("#comparison-highlights"),
@@ -42,13 +64,65 @@ const chartStyles = {
   text: "#6f6a61",
 };
 
+const previews = {
+  main: createPreviewController({
+    root: document.querySelector("#video-preview"),
+    video: document.querySelector("#local-video"),
+    emptyState: document.querySelector("#video-empty-state"),
+    qualityBadge: document.querySelector("#video-quality-badge"),
+    statusCopy: document.querySelector("#video-status-copy"),
+    stallOverlay: document.querySelector("#video-stall-overlay"),
+    emptyMessage:
+      "Upload a local video to turn SODA and baseline decisions into a visible playback demo.",
+  }),
+  compareLeft: createPreviewController({
+    root: document.querySelector("#compare-left-preview"),
+    video: document.querySelector("#compare-left-video"),
+    emptyState: document.querySelector("#compare-left-empty"),
+    qualityBadge: document.querySelector("#compare-left-quality"),
+    statusCopy: document.querySelector("#compare-left-status"),
+    stallOverlay: document.querySelector("#compare-left-stall"),
+    emptyMessage: "Upload a local video to start the side-by-side comparison.",
+  }),
+  compareRight: createPreviewController({
+    root: document.querySelector("#compare-right-preview"),
+    video: document.querySelector("#compare-right-video"),
+    emptyState: document.querySelector("#compare-right-empty"),
+    qualityBadge: document.querySelector("#compare-right-quality"),
+    statusCopy: document.querySelector("#compare-right-status"),
+    stallOverlay: document.querySelector("#compare-right-stall"),
+    emptyMessage: BASELINE_SELECTION_HINT,
+  }),
+};
+
 let traceCatalog = [];
 let batchResults = null;
-let simulator = null;
-let predictor = null;
-let controller = null;
-let metrics = null;
+let mainSession = null;
+let compareSodaSession = null;
 let timerId = null;
+let localVideoUrl = null;
+
+function createPreviewController({
+  root,
+  video,
+  emptyState,
+  qualityBadge,
+  statusCopy,
+  stallOverlay,
+  emptyMessage,
+}) {
+  return {
+    root,
+    video,
+    emptyState,
+    qualityBadge,
+    statusCopy,
+    stallOverlay,
+    emptyMessage,
+    stallTimeoutId: null,
+    stallActive: false,
+  };
+}
 
 function formatPercent(value, digits = 1) {
   return `${(value * 100).toFixed(digits)}%`;
@@ -95,79 +169,414 @@ async function loadBatchResults() {
   }
 }
 
-function buildSession() {
-  const trace = getSelectedTrace();
-  const algorithmSpec = getSelectedAlgorithmSpec();
-  predictor = createMovingAveragePredictor({ windowSize: 5, defaultValue: 2.2 });
-  controller = algorithmSpec.factory();
-  simulator = new AbrSimulator({
+function createAbrSession(algorithmId, trace) {
+  const algorithmSpec = ABR_ALGORITHMS[algorithmId];
+  return {
+    algorithmId,
+    algorithmSpec,
     trace,
-    chunkDuration: CHUNK_DURATION,
-    bitrateLadderMbps: BITRATE_LADDER_MBPS,
-    startupBuffer: 4,
-    maxBuffer: 20,
+    predictor: createMovingAveragePredictor({ windowSize: 5, defaultValue: 2.2 }),
+    controller: algorithmSpec.factory(),
+    simulator: new AbrSimulator({
+      trace,
+      chunkDuration: CHUNK_DURATION,
+      bitrateLadderMbps: BITRATE_LADDER_MBPS,
+      startupBuffer: 4,
+      maxBuffer: 20,
+    }),
+    metrics: createMetricsTracker({
+      traceId: trace.id,
+      algorithmId,
+      chunkDuration: CHUNK_DURATION,
+      bitrateLadderMbps: BITRATE_LADDER_MBPS,
+    }),
+  };
+}
+
+function stepAbrSession(session) {
+  if (!session || session.simulator.isFinished()) {
+    return null;
+  }
+
+  const predictedThroughput = session.predictor.predict();
+  const decisionContext = session.simulator.buildDecisionContext({
+    predictedThroughput,
+    previousBitrateIndex: session.simulator.getLastBitrateIndex(),
   });
-  metrics = createMetricsTracker({
-    traceId: trace.id,
-    algorithmId: ui.algorithmSelect.value,
-    chunkDuration: CHUNK_DURATION,
-    bitrateLadderMbps: BITRATE_LADDER_MBPS,
+  const bitrateIndex = session.controller.selectBitrateIndex(decisionContext);
+  const chunkResult = session.simulator.downloadNextChunk({
+    bitrateIndex,
+    predictedThroughput,
   });
+  session.predictor.pushSample(chunkResult.actualThroughputMbps);
+  session.metrics.recordChunk(chunkResult);
+  return chunkResult;
+}
+
+function getSessionSnapshot(session) {
+  return session ? session.simulator.getSnapshot() : null;
+}
+
+function getSessionSummary(session) {
+  return session ? session.metrics.getSummary(session.simulator.getSnapshot()) : null;
+}
+
+function previewHasVideo(preview) {
+  return preview.video.hasAttribute("src");
+}
+
+function clearPreviewStall(preview) {
+  if (preview.stallTimeoutId) {
+    window.clearTimeout(preview.stallTimeoutId);
+    preview.stallTimeoutId = null;
+  }
+  preview.stallActive = false;
+  preview.root.classList.remove("is-stalled");
+  preview.stallOverlay.textContent = "Rebuffering";
+}
+
+function pausePreview(preview) {
+  if (!previewHasVideo(preview)) {
+    return;
+  }
+  preview.video.pause();
+}
+
+function playPreview(preview) {
+  if (!previewHasVideo(preview) || preview.stallActive || preview.video.readyState < 2) {
+    return;
+  }
+  preview.video.playbackRate = VISUAL_PLAYBACK_RATE;
+  const promise = preview.video.play();
+  if (promise && typeof promise.catch === "function") {
+    promise.catch(() => {});
+  }
+}
+
+function resetPreviewPlayback(preview) {
+  clearPreviewStall(preview);
+  pausePreview(preview);
+
+  if (!previewHasVideo(preview) || preview.video.readyState < 1) {
+    return;
+  }
+
+  try {
+    preview.video.currentTime = 0;
+  } catch {
+    // Ignore occasional media seek errors while metadata is stabilizing.
+  }
+}
+
+function setPreviewSource(preview, url, emptyMessage = preview.emptyMessage) {
+  preview.emptyState.textContent = emptyMessage;
+
+  if (!url) {
+    clearPreviewStall(preview);
+    pausePreview(preview);
+    preview.video.removeAttribute("src");
+    preview.video.load();
+    preview.root.classList.remove("has-video", "is-stalled");
+    preview.qualityBadge.textContent = "No video loaded";
+    preview.statusCopy.textContent = emptyMessage;
+    preview.root.style.setProperty("--video-blur", "9px");
+    preview.root.style.setProperty("--video-saturation", "0.65");
+    preview.root.style.setProperty("--video-contrast", "0.82");
+    preview.root.style.setProperty("--video-overlay-opacity", "0.38");
+    return;
+  }
+
+  if (preview.video.getAttribute("src") !== url) {
+    preview.video.setAttribute("src", url);
+    preview.video.load();
+  }
+  preview.root.classList.add("has-video");
+}
+
+function syncPreviewToSnapshot(preview, snapshot) {
+  if (!snapshot || !previewHasVideo(preview)) {
+    return;
+  }
+
+  if (
+    preview.video.readyState < 1 ||
+    !Number.isFinite(preview.video.duration) ||
+    preview.video.duration <= 0
+  ) {
+    return;
+  }
+
+  const traceDuration = snapshot.totalChunks * CHUNK_DURATION;
+  const targetTime = Math.min(
+    preview.video.duration,
+    (snapshot.playbackPosition / traceDuration) * preview.video.duration
+  );
+  const drift = Math.abs(preview.video.currentTime - targetTime);
+
+  if (!timerId || preview.stallActive || drift > 0.65) {
+    try {
+      preview.video.currentTime = targetTime;
+    } catch {
+      // Ignore occasional browser seek rejections during fast updates.
+    }
+  }
+}
+
+function renderPreview(preview, snapshot, statusText) {
+  const hasVideo = previewHasVideo(preview);
+  preview.root.classList.toggle("has-video", hasVideo);
+  preview.root.classList.toggle("is-stalled", preview.stallActive);
+
+  if (!hasVideo) {
+    preview.qualityBadge.textContent = "No video loaded";
+    preview.statusCopy.textContent = preview.emptyState.textContent;
+    return;
+  }
+
+  const bitrateIndex =
+    !snapshot || snapshot.history.length === 0
+      ? 0
+      : snapshot.history[snapshot.history.length - 1].selectedBitrateIndex;
+  const normalizedQuality = bitrateIndex / Math.max(BITRATE_LADDER_MBPS.length - 1, 1);
+  const bitrateMbps = snapshot?.currentBitrateMbps ?? BITRATE_LADDER_MBPS[0];
+  const qualityLabel = QUALITY_LABELS[bitrateIndex] ?? "Adaptive";
+
+  preview.root.style.setProperty("--video-blur", `${(9.5 - normalizedQuality * 8.5).toFixed(2)}px`);
+  preview.root.style.setProperty("--video-saturation", (0.62 + normalizedQuality * 0.38).toFixed(2));
+  preview.root.style.setProperty("--video-contrast", (0.8 + normalizedQuality * 0.2).toFixed(2));
+  preview.root.style.setProperty("--video-overlay-opacity", (0.42 - normalizedQuality * 0.34).toFixed(2));
+  preview.qualityBadge.textContent = `Simulated ${qualityLabel} · ${bitrateMbps.toFixed(2)} Mbps`;
+  preview.statusCopy.textContent = statusText;
+  syncPreviewToSnapshot(preview, snapshot);
+}
+
+function triggerPreviewStall(preview, stallSeconds) {
+  if (!previewHasVideo(preview) || stallSeconds <= 0) {
+    return;
+  }
+
+  clearPreviewStall(preview);
+  preview.stallActive = true;
+  preview.root.classList.add("is-stalled");
+  preview.stallOverlay.textContent = `Rebuffering ${stallSeconds.toFixed(1)} s`;
+  pausePreview(preview);
+
+  const stallWallClockMs = Math.max(280, (stallSeconds * STEP_INTERVAL_MS) / CHUNK_DURATION);
+  preview.stallTimeoutId = window.setTimeout(() => {
+    preview.stallActive = false;
+    preview.root.classList.remove("is-stalled");
+    if (timerId) {
+      playPreview(preview);
+    }
+    preview.stallTimeoutId = null;
+  }, stallWallClockMs);
+}
+
+function renderSummaryCards(container, summary, placeholderText) {
+  if (!summary) {
+    container.innerHTML = `<article class="compare-summary-placeholder">${placeholderText}</article>`;
+    return;
+  }
+
+  const items = [
+    { label: "QoE", value: summary.qoe.toFixed(3) },
+    { label: "Rebuffer", value: formatPercent(summary.rebufferRatio, 2) },
+    { label: "Switching", value: formatPercent(summary.switchingRate, 2) },
+    { label: "Mean utility", value: summary.meanUtility.toFixed(3) },
+  ];
+
+  container.innerHTML = "";
+  items.forEach((item) => {
+    const card = document.createElement("article");
+    card.className = "compare-summary-card";
+    card.innerHTML = `<span>${item.label}</span><strong>${item.value}</strong>`;
+    container.appendChild(card);
+  });
+}
+
+function getShowdownLeftSession() {
+  return mainSession?.algorithmId === "soda" ? mainSession : compareSodaSession;
+}
+
+function getShowdownRightSession() {
+  return mainSession?.algorithmId === "soda" ? null : mainSession;
+}
+
+function syncPreviewSources() {
+  const rightShowdownSession = getShowdownRightSession();
+  setPreviewSource(previews.main, localVideoUrl, previews.main.emptyMessage);
+  setPreviewSource(previews.compareLeft, localVideoUrl, previews.compareLeft.emptyMessage);
+  setPreviewSource(
+    previews.compareRight,
+    rightShowdownSession ? localVideoUrl : null,
+    rightShowdownSession ? previews.compareRight.emptyMessage : BASELINE_SELECTION_HINT
+  );
+}
+
+function clearAllPreviewStalls() {
+  Object.values(previews).forEach(clearPreviewStall);
+}
+
+function pauseAllPreviews() {
+  Object.values(previews).forEach(pausePreview);
+}
+
+function playActivePreviews() {
+  playPreview(previews.main);
+  playPreview(previews.compareLeft);
+  if (getShowdownRightSession()) {
+    playPreview(previews.compareRight);
+  }
+}
+
+function resetAllPreviewPlayback() {
+  Object.values(previews).forEach(resetPreviewPlayback);
+}
+
+function revokeLocalVideoUrl() {
+  if (!localVideoUrl) {
+    return;
+  }
+  URL.revokeObjectURL(localVideoUrl);
+  localVideoUrl = null;
+}
+
+function clearLocalVideo({ clearInput = true } = {}) {
+  clearAllPreviewStalls();
+  pauseAllPreviews();
+  revokeLocalVideoUrl();
+  syncPreviewSources();
+  if (clearInput) {
+    ui.videoUpload.value = "";
+  }
+  renderAll();
+}
+
+function handleVideoSelection(event) {
+  const [file] = event.target.files ?? [];
+  if (!file) {
+    return;
+  }
+
+  clearAllPreviewStalls();
+  pauseAllPreviews();
+  revokeLocalVideoUrl();
+  localVideoUrl = URL.createObjectURL(file);
+  syncPreviewSources();
+  renderAll();
+}
+
+function buildSessions() {
+  const trace = getSelectedTrace();
+  const selectedAlgorithmId = ui.algorithmSelect.value;
+  const algorithmSpec = getSelectedAlgorithmSpec();
+
+  mainSession = createAbrSession(selectedAlgorithmId, trace);
+  compareSodaSession =
+    selectedAlgorithmId === "soda" ? null : createAbrSession("soda", trace);
+
   ui.sessionTitle.textContent = `${algorithmSpec.label} on ${trace.label}`;
   ui.scenarioDescription.textContent = `${algorithmSpec.description} ${trace.description}`;
-  renderComparison();
-  render();
+
+  clearAllPreviewStalls();
+  resetAllPreviewPlayback();
+  syncPreviewSources();
+  renderAll();
 }
 
 function startLoop() {
-  if (timerId || simulator.isFinished()) {
+  if (!mainSession || timerId || mainSession.simulator.isFinished()) {
     return;
   }
-  timerId = window.setInterval(stepSession, 650);
+  timerId = window.setInterval(stepSessions, STEP_INTERVAL_MS);
+  playActivePreviews();
+  renderAll();
 }
 
 function pauseLoop() {
-  if (!timerId) {
-    return;
+  if (timerId) {
+    window.clearInterval(timerId);
+    timerId = null;
   }
-  window.clearInterval(timerId);
-  timerId = null;
+  clearAllPreviewStalls();
+  pauseAllPreviews();
+  renderAll();
 }
 
 function resetSession() {
   pauseLoop();
-  buildSession();
+  buildSessions();
 }
 
-function stepSession() {
-  if (simulator.isFinished()) {
+function stepSessions() {
+  if (!mainSession || mainSession.simulator.isFinished()) {
     pauseLoop();
-    render();
     return;
   }
 
-  const predictedThroughput = predictor.predict();
-  const decisionContext = simulator.buildDecisionContext({
-    predictedThroughput,
-    previousBitrateIndex: simulator.getLastBitrateIndex(),
-  });
-  const bitrateIndex = controller.selectBitrateIndex(decisionContext);
-  const chunkResult = simulator.downloadNextChunk({
-    bitrateIndex,
-    predictedThroughput,
-  });
-  predictor.pushSample(chunkResult.actualThroughputMbps);
-  metrics.recordChunk(chunkResult);
-  render();
+  const mainChunk = stepAbrSession(mainSession);
+  const sodaChunk = stepAbrSession(compareSodaSession);
+  const leftChunk = mainSession.algorithmId === "soda" ? mainChunk : sodaChunk;
+  const rightChunk = getShowdownRightSession() ? mainChunk : null;
 
-  if (simulator.isFinished()) {
+  if (mainChunk?.stallSeconds > 0) {
+    triggerPreviewStall(previews.main, mainChunk.stallSeconds);
+  }
+
+  if (leftChunk?.stallSeconds > 0) {
+    triggerPreviewStall(previews.compareLeft, leftChunk.stallSeconds);
+  }
+
+  if (rightChunk?.stallSeconds > 0) {
+    triggerPreviewStall(previews.compareRight, rightChunk.stallSeconds);
+  }
+
+  renderAll();
+
+  if (mainSession.simulator.isFinished()) {
     pauseLoop();
   }
 }
 
-function render() {
-  const snapshot = simulator.getSnapshot();
-  const summary = formatSummaryMetrics(metrics.getSummary(snapshot));
+function getPreviewStatusText(session, preview, label) {
+  if (!session) {
+    return "Select HYB-like, BOLA-like, or Greedy to activate this lane.";
+  }
+
+  const snapshot = getSessionSnapshot(session);
+  if (!previewHasVideo(preview)) {
+    return preview.emptyState.textContent;
+  }
+
+  if (!snapshot || snapshot.history.length === 0) {
+    return `${label} is ready. Press Start to replay the selected trace on the uploaded video.`;
+  }
+
+  if (preview.stallActive || snapshot.lastStallSeconds > 0) {
+    return `${label} is freezing to visualize a rebuffer event.`;
+  }
+
+  if (timerId) {
+    return `${label} is replaying the same trace under synchronized timing.`;
+  }
+
+  return `${label} is paused. Use Start to continue the comparison.`;
+}
+
+function renderMainMetrics(summary) {
+  ui.metricsGrid.innerHTML = "";
+  formatSummaryMetrics(summary).forEach((item) => {
+    const card = document.createElement("article");
+    card.className = "metric-card";
+    card.innerHTML = `<span>${item.label}</span><strong>${item.value}</strong>`;
+    ui.metricsGrid.appendChild(card);
+  });
+}
+
+function renderMainStage() {
+  const snapshot = getSessionSnapshot(mainSession);
+  const summary = getSessionSummary(mainSession);
+
   ui.currentBitrate.textContent = `${snapshot.currentBitrateMbps.toFixed(2)} Mbps`;
   ui.currentThroughput.textContent = `${snapshot.lastThroughputMbps.toFixed(2)} Mbps`;
   ui.currentBuffer.textContent = `${snapshot.bufferSeconds.toFixed(1)} s`;
@@ -176,14 +585,21 @@ function render() {
 
   const traceDuration = snapshot.totalChunks * CHUNK_DURATION;
   ui.playbackProgress.style.width = `${Math.min(100, (snapshot.playbackPosition / traceDuration) * 100)}%`;
-  ui.bufferProgress.style.width = `${Math.min(100, (snapshot.bufferSeconds / simulator.maxBuffer) * 100)}%`;
+  ui.bufferProgress.style.width = `${Math.min(100, (snapshot.bufferSeconds / mainSession.simulator.maxBuffer) * 100)}%`;
 
   const isStalling = snapshot.lastStallSeconds > 0;
-  ui.stallIndicator.textContent = isStalling ? `Stalling ${snapshot.lastStallSeconds.toFixed(1)} s` : "Smooth";
+  ui.stallIndicator.textContent = isStalling
+    ? `Stalling ${snapshot.lastStallSeconds.toFixed(1)} s`
+    : "Smooth";
   ui.stallIndicator.classList.toggle("stalling", isStalling);
 
-  renderMetrics(summary);
+  renderMainMetrics(summary);
   renderDecisionLog(snapshot.history);
+  renderPreview(
+    previews.main,
+    snapshot,
+    getPreviewStatusText(mainSession, previews.main, mainSession.algorithmSpec.label)
+  );
   drawLineChart(ui.throughputChart, snapshot.history, {
     accessor: (item) => item.actualThroughputMbps,
     label: "Mbps",
@@ -202,23 +618,56 @@ function render() {
   drawLineChart(ui.bufferChart, snapshot.history, {
     accessor: (item) => item.bufferAfterSeconds,
     label: "sec",
-    maxValue: simulator.maxBuffer,
+    maxValue: mainSession.simulator.maxBuffer,
     style: chartStyles.buffer,
     stalls: snapshot.history,
   });
 }
 
-function renderMetrics(summary) {
-  ui.metricsGrid.innerHTML = "";
-  summary.forEach((item) => {
-    const card = document.createElement("article");
-    card.className = "metric-card";
-    card.innerHTML = `<span>${item.label}</span><strong>${item.value}</strong>`;
-    ui.metricsGrid.appendChild(card);
-  });
+function renderShowdownStage() {
+  const leftSession = getShowdownLeftSession();
+  const rightSession = getShowdownRightSession();
+  const trace = getSelectedTrace();
+
+  ui.compareLeftLabel.textContent = "SODA (paper reproduction)";
+  ui.compareRightLabel.textContent = rightSession
+    ? rightSession.algorithmSpec.label
+    : "Choose a baseline";
+
+  if (rightSession) {
+    ui.showdownTitle.textContent = `SODA vs ${rightSession.algorithmSpec.label} on ${trace.label}`;
+    ui.showdownCopy.textContent =
+      "Both panes replay the same local video under the same trace. The only difference is the ABR controller.";
+  } else {
+    ui.showdownTitle.textContent = "Select a non-SODA algorithm to activate the right lane";
+    ui.showdownCopy.textContent =
+      "The left lane always stays on SODA. Choose HYB-like, BOLA-like, or Greedy to create a true side-by-side showdown.";
+  }
+
+  renderPreview(
+    previews.compareLeft,
+    getSessionSnapshot(leftSession),
+    getPreviewStatusText(leftSession, previews.compareLeft, "SODA")
+  );
+  renderSummaryCards(
+    ui.compareLeftSummary,
+    getSessionSummary(leftSession),
+    "SODA metrics will appear here once the session is initialized."
+  );
+
+  renderPreview(
+    previews.compareRight,
+    getSessionSnapshot(rightSession),
+    getPreviewStatusText(rightSession, previews.compareRight, rightSession?.algorithmSpec.label ?? "The right lane")
+  );
+  renderSummaryCards(
+    ui.compareRightSummary,
+    getSessionSummary(rightSession),
+    BASELINE_SELECTION_HINT
+  );
 }
 
-function renderComparison() {
+function renderComparisonTable() {
   const selectedTrace = getSelectedTrace();
   const selectedAlgorithmId = ui.algorithmSelect.value;
 
@@ -409,22 +858,52 @@ function drawLineChart(canvas, history, options) {
   ctx.stroke();
 }
 
+function renderAll() {
+  if (!mainSession) {
+    return;
+  }
+  renderMainStage();
+  renderShowdownStage();
+  renderComparisonTable();
+}
+
+function attachPreviewLoadedMetadataHandler(preview, sessionGetter) {
+  preview.video.addEventListener("loadedmetadata", () => {
+    const session = sessionGetter();
+    syncPreviewToSnapshot(preview, getSessionSnapshot(session));
+    if (timerId) {
+      playPreview(preview);
+    }
+  });
+}
+
 async function init() {
   [traceCatalog, batchResults] = await Promise.all([
     loadTraceCatalog("../traces"),
     loadBatchResults(),
   ]);
+
   populateSelectors();
   ui.algorithmSelect.value = "soda";
   ui.scenarioSelect.value = traceCatalog[0].id;
-  buildSession();
+
+  attachPreviewLoadedMetadataHandler(previews.main, () => mainSession);
+  attachPreviewLoadedMetadataHandler(previews.compareLeft, () => getShowdownLeftSession());
+  attachPreviewLoadedMetadataHandler(previews.compareRight, () => getShowdownRightSession());
+
+  buildSessions();
 
   ui.algorithmSelect.addEventListener("change", resetSession);
   ui.scenarioSelect.addEventListener("change", resetSession);
   ui.startBtn.addEventListener("click", startLoop);
   ui.pauseBtn.addEventListener("click", pauseLoop);
   ui.resetBtn.addEventListener("click", resetSession);
-  window.addEventListener("resize", render);
+  ui.videoUpload.addEventListener("change", handleVideoSelection);
+  ui.clearVideoBtn.addEventListener("click", () => clearLocalVideo());
+  window.addEventListener("beforeunload", () => {
+    revokeLocalVideoUrl();
+  });
+  window.addEventListener("resize", renderAll);
 }
 
 init();
