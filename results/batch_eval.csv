@@ -1,0 +1,13 @@
+algorithm_id,algorithm_label,trace_id,trace_label,mean_utility,rebuffer_ratio,switching_rate,qoe,avg_bitrate_mbps,total_stall_s,switches
+soda,SODA (paper reproduction),stable,Stable,0.893027,0.000000,0.205128,0.687899,4.593750,0.000000,8
+hyb,HYB-like Throughput Baseline,stable,Stable,0.952737,0.024322,0.794872,-0.085355,5.277500,1.945761,31
+bola,BOLA-like Buffer Baseline,stable,Stable,0.877448,0.000000,0.333333,0.544114,4.542500,0.000000,13
+greedy,Greedy Throughput Baseline,stable,Stable,0.878323,0.000000,0.051282,0.827041,4.202500,0.000000,2
+soda,SODA (paper reproduction),volatile,Volatile,0.689865,0.000000,0.358974,0.330891,2.456250,0.000000,14
+hyb,HYB-like Throughput Baseline,volatile,Volatile,0.836656,0.427698,0.794872,-4.235200,3.762500,34.215877,31
+bola,BOLA-like Buffer Baseline,volatile,Volatile,0.678551,0.000000,0.410256,0.268294,2.415000,0.000000,16
+greedy,Greedy Throughput Baseline,volatile,Volatile,0.751326,0.040589,0.051282,0.294149,2.861250,3.247160,2
+soda,SODA (paper reproduction),deep-drop,Deep Drop,0.744482,0.000000,0.282051,0.462431,3.646250,0.000000,11
+hyb,HYB-like Throughput Baseline,deep-drop,Deep Drop,0.870064,0.249898,0.410256,-2.039177,4.561250,19.991878,16
+bola,BOLA-like Buffer Baseline,deep-drop,Deep Drop,0.743367,0.000000,0.384615,0.358751,3.426250,0.000000,15
+greedy,Greedy Throughput Baseline,deep-drop,Deep Drop,0.717463,0.011863,0.282051,0.316785,3.021250,0.949011,11

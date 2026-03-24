@@ -1,0 +1,8 @@
+{
+  "name": "soda-paper-reproduction",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "eval": "node ./scripts/batch_eval.js"
+  }
+}

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interactive ABR Demo</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">COMP5311 Course Project Demo</p>
+        <h1>SODA Paper Reproduction with Trace-Replayed Network Scenarios</h1>
+        <p class="hero-copy">
+          Reproduce the SODA controller from the paper with a time-based planning
+          objective, compare it against representative baselines, and surface the
+          smoothness and robustness gains directly in the browser.
+        </p>
+      </div>
+      <div class="hero-note">
+        <span class="note-label">Reproduction setup</span>
+        <strong>2.0s chunks · 5-step horizon · monotonic search · paper QoE</strong>
+      </div>
+    </header>
+
+    <main class="dashboard">
+      <section class="control-card">
+        <div class="selectors">
+          <label>
+            <span>Algorithm</span>
+            <select id="algorithm-select"></select>
+          </label>
+          <label>
+            <span>Scenario</span>
+            <select id="scenario-select"></select>
+          </label>
+        </div>
+        <div class="controls">
+          <button id="start-btn" class="btn btn-primary">Start</button>
+          <button id="pause-btn" class="btn">Pause</button>
+          <button id="reset-btn" class="btn">Reset</button>
+        </div>
+        <div class="scenario-description" id="scenario-description"></div>
+      </section>
+
+      <section class="stage-card">
+        <div class="player-panel">
+          <div class="player-header">
+            <div>
+              <p class="eyebrow">Session State</p>
+              <h2 id="session-title">Ready to replay</h2>
+            </div>
+            <div class="status-pill" id="stall-indicator">Smooth</div>
+          </div>
+          <div class="screen">
+            <div class="screen-overlay">
+              <div class="screen-stat">
+                <span>Current bitrate</span>
+                <strong id="current-bitrate">0.30 Mbps</strong>
+              </div>
+              <div class="screen-stat">
+                <span>Estimated throughput</span>
+                <strong id="current-throughput">0.00 Mbps</strong>
+              </div>
+              <div class="screen-stat">
+                <span>Buffer</span>
+                <strong id="current-buffer">0.0 s</strong>
+              </div>
+            </div>
+            <div class="timeline-stack">
+              <div class="timeline-labels">
+                <span id="playback-position">Playback 0.0 s</span>
+                <span id="elapsed-time">Elapsed 0.0 s</span>
+              </div>
+              <div class="progress-track">
+                <div class="progress-fill" id="playback-progress"></div>
+              </div>
+              <div class="buffer-track">
+                <div class="buffer-fill" id="buffer-progress"></div>
+              </div>
+            </div>
+          </div>
+          <div class="legend">
+            <span><i class="legend-chip throughput-chip"></i>Throughput trace</span>
+            <span><i class="legend-chip bitrate-chip"></i>Selected bitrate</span>
+            <span><i class="legend-chip buffer-chip"></i>Buffer occupancy</span>
+            <span><i class="legend-chip stall-chip"></i>Rebuffer event</span>
+          </div>
+        </div>
+
+        <div class="metrics-grid" id="metrics-grid"></div>
+      </section>
+
+      <section class="comparison-card">
+        <div class="charts-header">
+          <div>
+            <p class="eyebrow">Paper-Style Comparison</p>
+            <h2 id="comparison-title">Batch evaluation across all traces</h2>
+          </div>
+          <p class="charts-copy" id="comparison-copy">
+            The table below is generated offline from the same controller implementations used by the live simulator.
+          </p>
+        </div>
+        <div class="comparison-highlights" id="comparison-highlights"></div>
+        <div class="solver-note" id="solver-note"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Algorithm</th>
+                <th>Mean utility</th>
+                <th>Rebuffer ratio</th>
+                <th>Switching rate</th>
+                <th>QoE</th>
+                <th>Avg bitrate</th>
+                <th>Stall s</th>
+              </tr>
+            </thead>
+            <tbody id="comparison-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="charts-card">
+        <div class="charts-header">
+          <div>
+            <p class="eyebrow">Chunk-by-Chunk Behavior</p>
+            <h2>Live metrics</h2>
+          </div>
+          <p class="charts-copy">
+            Each chart updates when a chunk completes downloading.
+          </p>
+        </div>
+        <div class="charts-grid">
+          <article class="chart-panel">
+            <div class="chart-title-row">
+              <h3>Throughput</h3>
+              <span id="throughput-caption">Trace replay</span>
+            </div>
+            <canvas id="throughput-chart" width="640" height="240"></canvas>
+          </article>
+          <article class="chart-panel">
+            <div class="chart-title-row">
+              <h3>Bitrate</h3>
+              <span id="bitrate-caption">ABR decisions</span>
+            </div>
+            <canvas id="bitrate-chart" width="640" height="240"></canvas>
+          </article>
+          <article class="chart-panel">
+            <div class="chart-title-row">
+              <h3>Buffer</h3>
+              <span id="buffer-caption">Occupancy and stalls</span>
+            </div>
+            <canvas id="buffer-chart" width="640" height="240"></canvas>
+          </article>
+        </div>
+      </section>
+
+      <section class="table-card">
+        <div class="charts-header">
+          <div>
+            <p class="eyebrow">Decision Log</p>
+            <h2>Recent chunks</h2>
+          </div>
+          <p class="charts-copy">
+            The last eight chunk downloads and adaptation outcomes.
+          </p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Chunk</th>
+                <th>Predicted Mbps</th>
+                <th>Actual Mbps</th>
+                <th>Bitrate Mbps</th>
+                <th>Download s</th>
+                <th>Buffer s</th>
+                <th>Stall s</th>
+              </tr>
+            </thead>
+            <tbody id="decision-log"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

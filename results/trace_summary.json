@@ -1,0 +1,23 @@
+{
+  "deep_drop_trace": {
+    "count": 40,
+    "min_mbps": 0.6,
+    "max_mbps": 5.8,
+    "avg_mbps": 4.02,
+    "below_2mbps_ratio": 0.175
+  },
+  "stable_trace": {
+    "count": 40,
+    "min_mbps": 4.6,
+    "max_mbps": 5.4,
+    "avg_mbps": 5.0325,
+    "below_2mbps_ratio": 0.0
+  },
+  "volatile_trace": {
+    "count": 40,
+    "min_mbps": 1.1,
+    "max_mbps": 5.7,
+    "avg_mbps": 3.45,
+    "below_2mbps_ratio": 0.2
+  }
+}
