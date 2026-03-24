@@ -3,7 +3,11 @@ export const PAPER_QOE_WEIGHTS = {
   switching: 1,
 };
 
-function normalizedUtilityForBitrate(bitrateMbps, bitrateLadderMbps) {
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
+}
+
+export function normalizedUtilityForBitrate(bitrateMbps, bitrateLadderMbps) {
   const minBitrate = bitrateLadderMbps[0];
   const maxBitrate = bitrateLadderMbps[bitrateLadderMbps.length - 1];
 
@@ -14,6 +18,19 @@ function normalizedUtilityForBitrate(bitrateMbps, bitrateLadderMbps) {
   return Math.log(bitrateMbps / minBitrate) / Math.log(maxBitrate / minBitrate);
 }
 
+function resolveUtilityForRecord(record, bitrateLadderMbps, utilityProfile) {
+  const utilityByBitrateIndex = utilityProfile?.utilityByBitrateIndex;
+  if (
+    Array.isArray(utilityByBitrateIndex) &&
+    utilityByBitrateIndex.length === bitrateLadderMbps.length &&
+    Number.isInteger(record.selectedBitrateIndex)
+  ) {
+    return clamp01(utilityByBitrateIndex[record.selectedBitrateIndex] ?? 0);
+  }
+
+  return normalizedUtilityForBitrate(record.selectedBitrateMbps, bitrateLadderMbps);
+}
+
 export function summarizeRecords({
   records,
   traceId,
@@ -22,6 +39,7 @@ export function summarizeRecords({
   bitrateLadderMbps,
   qoeWeights = PAPER_QOE_WEIGHTS,
   totalChunks,
+  utilityProfile = null,
 }) {
   const totalStallSeconds = records.reduce((acc, item) => acc + item.stallSeconds, 0);
   const averageBitrate =
@@ -47,7 +65,7 @@ export function summarizeRecords({
       ? 0
       : records.reduce(
           (acc, item) =>
-            acc + normalizedUtilityForBitrate(item.selectedBitrateMbps, bitrateLadderMbps),
+            acc + resolveUtilityForRecord(item, bitrateLadderMbps, utilityProfile),
           0
         ) / records.length;
   const playbackDurationSeconds = records.length * chunkDuration;
@@ -72,6 +90,11 @@ export function summarizeRecords({
     switchingRate,
     qoe,
     playbackDurationSeconds,
+    contentAwareUtility: Boolean(utilityProfile?.contentAware),
+    utilityProfileLabel: utilityProfile?.label ?? "Generic bitrate-only utility",
+    utilityProfileShortLabel: utilityProfile?.shortLabel ?? "Bitrate only",
+    utilityProfileDescription:
+      utilityProfile?.description ?? "The uploaded video is not influencing live utility.",
   };
 }
 
@@ -81,6 +104,7 @@ export function createMetricsTracker({
   chunkDuration,
   bitrateLadderMbps,
   qoeWeights,
+  utilityProfile,
 }) {
   const records = [];
 
@@ -97,6 +121,7 @@ export function createMetricsTracker({
         bitrateLadderMbps,
         qoeWeights,
         totalChunks: snapshot.totalChunks,
+        utilityProfile,
       });
     },
   };
@@ -113,8 +138,12 @@ export function formatSummaryMetrics(summary) {
       value: `${summary.qoe.toFixed(3)}`,
     },
     {
-      label: "Mean utility",
+      label: summary.contentAwareUtility ? "Mean content utility" : "Mean utility",
       value: `${summary.meanUtility.toFixed(3)}`,
+    },
+    {
+      label: "Utility model",
+      value: summary.utilityProfileShortLabel,
     },
     {
       label: "Rebuffer ratio",

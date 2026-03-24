@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-03-24T11:37:53.243Z",
+  "generatedAt": "2026-03-24T13:36:23.228Z",
   "qoeWeights": {
     "rebuffer": 10,
     "switching": 1
@@ -71,6 +71,10 @@
       "switchingRate": 0.20512820512820512,
       "qoe": 0.6878986623471661,
       "playbackDurationSeconds": 80,
+      "contentAwareUtility": false,
+      "utilityProfileLabel": "Generic bitrate-only utility",
+      "utilityProfileShortLabel": "Bitrate only",
+      "utilityProfileDescription": "The uploaded video is not influencing live utility.",
       "traceLabel": "Stable",
       "algorithmLabel": "SODA (paper reproduction)"
     },
@@ -90,6 +94,10 @@
       "switchingRate": 0.7948717948717948,
       "qoe": -0.08535463326783554,
       "playbackDurationSeconds": 80,
+      "contentAwareUtility": false,
+      "utilityProfileLabel": "Generic bitrate-only utility",
+      "utilityProfileShortLabel": "Bitrate only",
+      "utilityProfileDescription": "The uploaded video is not influencing live utility.",
       "traceLabel": "Stable",
       "algorithmLabel": "HYB-like Throughput Baseline"
     },
@@ -109,6 +117,10 @@
       "switchingRate": 0.3333333333333333,
       "qoe": 0.5441142542930772,
       "playbackDurationSeconds": 80,
+      "contentAwareUtility": false,
+      "utilityProfileLabel": "Generic bitrate-only utility",
+      "utilityProfileShortLabel": "Bitrate only",
+      "utilityProfileDescription": "The uploaded video is not influencing live utility.",
       "traceLabel": "Stable",
       "algorithmLabel": "BOLA-like Buffer Baseline"
     },
@@ -128,6 +140,10 @@
       "switchingRate": 0.05128205128205128,
       "qoe": 0.827040659646718,
       "playbackDurationSeconds": 80,
+      "contentAwareUtility": false,
+      "utilityProfileLabel": "Generic bitrate-only utility",
+      "utilityProfileShortLabel": "Bitrate only",
+      "utilityProfileDescription": "The uploaded video is not influencing live utility.",
       "traceLabel": "Stable",
       "algorithmLabel": "Greedy Throughput Baseline"
     },
@@ -147,6 +163,10 @@
       "switchingRate": 0.358974358974359,
       "qoe": 0.33089096967603765,
       "playbackDurationSeconds": 80,
+      "contentAwareUtility": false,
+      "utilityProfileLabel": "Generic bitrate-only utility",
+      "utilityProfileShortLabel": "Bitrate only",
+      "utilityProfileDescription": "The uploaded video is not influencing live utility.",
       "traceLabel": "Volatile",
       "algorithmLabel": "SODA (paper reproduction)"
     },
@@ -166,6 +186,10 @@
       "switchingRate": 0.7948717948717948,
       "qoe": -4.23520018295721,
       "playbackDurationSeconds": 80,
+      "contentAwareUtility": false,
+      "utilityProfileLabel": "Generic bitrate-only utility",
+      "utilityProfileShortLabel": "Bitrate only",
+      "utilityProfileDescription": "The uploaded video is not influencing live utility.",
       "traceLabel": "Volatile",
       "algorithmLabel": "HYB-like Throughput Baseline"
     },
@@ -185,6 +209,10 @@
       "switchingRate": 0.41025641025641024,
       "qoe": 0.2682941690297582,
       "playbackDurationSeconds": 80,
+      "contentAwareUtility": false,
+      "utilityProfileLabel": "Generic bitrate-only utility",
+      "utilityProfileShortLabel": "Bitrate only",
+      "utilityProfileDescription": "The uploaded video is not influencing live utility.",
       "traceLabel": "Volatile",
       "algorithmLabel": "BOLA-like Buffer Baseline"
     },
@@ -204,6 +232,10 @@
       "switchingRate": 0.05128205128205128,
       "qoe": 0.2941487586168439,
       "playbackDurationSeconds": 80,
+      "contentAwareUtility": false,
+      "utilityProfileLabel": "Generic bitrate-only utility",
+      "utilityProfileShortLabel": "Bitrate only",
+      "utilityProfileDescription": "The uploaded video is not influencing live utility.",
       "traceLabel": "Volatile",
       "algorithmLabel": "Greedy Throughput Baseline"
     },
@@ -223,6 +255,10 @@
       "switchingRate": 0.28205128205128205,
       "qoe": 0.4624309357881946,
       "playbackDurationSeconds": 80,
+      "contentAwareUtility": false,
+      "utilityProfileLabel": "Generic bitrate-only utility",
+      "utilityProfileShortLabel": "Bitrate only",
+      "utilityProfileDescription": "The uploaded video is not influencing live utility.",
       "traceLabel": "Deep Drop",
       "algorithmLabel": "SODA (paper reproduction)"
     },
@@ -242,6 +278,10 @@
       "switchingRate": 0.41025641025641024,
       "qoe": -2.039176930809145,
       "playbackDurationSeconds": 80,
+      "contentAwareUtility": false,
+      "utilityProfileLabel": "Generic bitrate-only utility",
+      "utilityProfileShortLabel": "Bitrate only",
+      "utilityProfileDescription": "The uploaded video is not influencing live utility.",
       "traceLabel": "Deep Drop",
       "algorithmLabel": "HYB-like Throughput Baseline"
     },
@@ -261,6 +301,10 @@
       "switchingRate": 0.38461538461538464,
       "qoe": 0.3587512397492774,
       "playbackDurationSeconds": 80,
+      "contentAwareUtility": false,
+      "utilityProfileLabel": "Generic bitrate-only utility",
+      "utilityProfileShortLabel": "Bitrate only",
+      "utilityProfileDescription": "The uploaded video is not influencing live utility.",
       "traceLabel": "Deep Drop",
       "algorithmLabel": "BOLA-like Buffer Baseline"
     },
@@ -280,6 +324,10 @@
       "switchingRate": 0.28205128205128205,
       "qoe": 0.31678504993262424,
       "playbackDurationSeconds": 80,
+      "contentAwareUtility": false,
+      "utilityProfileLabel": "Generic bitrate-only utility",
+      "utilityProfileShortLabel": "Bitrate only",
+      "utilityProfileDescription": "The uploaded video is not influencing live utility.",
       "traceLabel": "Deep Drop",
       "algorithmLabel": "Greedy Throughput Baseline"
     }
@@ -302,6 +350,10 @@
         "switchingRate": 0.05128205128205128,
         "qoe": 0.827040659646718,
         "playbackDurationSeconds": 80,
+        "contentAwareUtility": false,
+        "utilityProfileLabel": "Generic bitrate-only utility",
+        "utilityProfileShortLabel": "Bitrate only",
+        "utilityProfileDescription": "The uploaded video is not influencing live utility.",
         "traceLabel": "Stable",
         "algorithmLabel": "Greedy Throughput Baseline"
       },
@@ -321,6 +373,10 @@
         "switchingRate": 0.20512820512820512,
         "qoe": 0.6878986623471661,
         "playbackDurationSeconds": 80,
+        "contentAwareUtility": false,
+        "utilityProfileLabel": "Generic bitrate-only utility",
+        "utilityProfileShortLabel": "Bitrate only",
+        "utilityProfileDescription": "The uploaded video is not influencing live utility.",
         "traceLabel": "Stable",
         "algorithmLabel": "SODA (paper reproduction)"
       },
@@ -340,6 +396,10 @@
         "switchingRate": 0.3333333333333333,
         "qoe": 0.5441142542930772,
         "playbackDurationSeconds": 80,
+        "contentAwareUtility": false,
+        "utilityProfileLabel": "Generic bitrate-only utility",
+        "utilityProfileShortLabel": "Bitrate only",
+        "utilityProfileDescription": "The uploaded video is not influencing live utility.",
         "traceLabel": "Stable",
         "algorithmLabel": "BOLA-like Buffer Baseline"
       },
@@ -359,6 +419,10 @@
         "switchingRate": 0.7948717948717948,
         "qoe": -0.08535463326783554,
         "playbackDurationSeconds": 80,
+        "contentAwareUtility": false,
+        "utilityProfileLabel": "Generic bitrate-only utility",
+        "utilityProfileShortLabel": "Bitrate only",
+        "utilityProfileDescription": "The uploaded video is not influencing live utility.",
         "traceLabel": "Stable",
         "algorithmLabel": "HYB-like Throughput Baseline"
       }
@@ -380,6 +444,10 @@
         "switchingRate": 0.358974358974359,
         "qoe": 0.33089096967603765,
         "playbackDurationSeconds": 80,
+        "contentAwareUtility": false,
+        "utilityProfileLabel": "Generic bitrate-only utility",
+        "utilityProfileShortLabel": "Bitrate only",
+        "utilityProfileDescription": "The uploaded video is not influencing live utility.",
         "traceLabel": "Volatile",
         "algorithmLabel": "SODA (paper reproduction)"
       },
@@ -399,6 +467,10 @@
         "switchingRate": 0.05128205128205128,
         "qoe": 0.2941487586168439,
         "playbackDurationSeconds": 80,
+        "contentAwareUtility": false,
+        "utilityProfileLabel": "Generic bitrate-only utility",
+        "utilityProfileShortLabel": "Bitrate only",
+        "utilityProfileDescription": "The uploaded video is not influencing live utility.",
         "traceLabel": "Volatile",
         "algorithmLabel": "Greedy Throughput Baseline"
       },
@@ -418,6 +490,10 @@
         "switchingRate": 0.41025641025641024,
         "qoe": 0.2682941690297582,
         "playbackDurationSeconds": 80,
+        "contentAwareUtility": false,
+        "utilityProfileLabel": "Generic bitrate-only utility",
+        "utilityProfileShortLabel": "Bitrate only",
+        "utilityProfileDescription": "The uploaded video is not influencing live utility.",
         "traceLabel": "Volatile",
         "algorithmLabel": "BOLA-like Buffer Baseline"
       },
@@ -437,6 +513,10 @@
         "switchingRate": 0.7948717948717948,
         "qoe": -4.23520018295721,
         "playbackDurationSeconds": 80,
+        "contentAwareUtility": false,
+        "utilityProfileLabel": "Generic bitrate-only utility",
+        "utilityProfileShortLabel": "Bitrate only",
+        "utilityProfileDescription": "The uploaded video is not influencing live utility.",
         "traceLabel": "Volatile",
         "algorithmLabel": "HYB-like Throughput Baseline"
       }
@@ -458,6 +538,10 @@
         "switchingRate": 0.28205128205128205,
         "qoe": 0.4624309357881946,
         "playbackDurationSeconds": 80,
+        "contentAwareUtility": false,
+        "utilityProfileLabel": "Generic bitrate-only utility",
+        "utilityProfileShortLabel": "Bitrate only",
+        "utilityProfileDescription": "The uploaded video is not influencing live utility.",
         "traceLabel": "Deep Drop",
         "algorithmLabel": "SODA (paper reproduction)"
       },
@@ -477,6 +561,10 @@
         "switchingRate": 0.38461538461538464,
         "qoe": 0.3587512397492774,
         "playbackDurationSeconds": 80,
+        "contentAwareUtility": false,
+        "utilityProfileLabel": "Generic bitrate-only utility",
+        "utilityProfileShortLabel": "Bitrate only",
+        "utilityProfileDescription": "The uploaded video is not influencing live utility.",
         "traceLabel": "Deep Drop",
         "algorithmLabel": "BOLA-like Buffer Baseline"
       },
@@ -496,6 +584,10 @@
         "switchingRate": 0.28205128205128205,
         "qoe": 0.31678504993262424,
         "playbackDurationSeconds": 80,
+        "contentAwareUtility": false,
+        "utilityProfileLabel": "Generic bitrate-only utility",
+        "utilityProfileShortLabel": "Bitrate only",
+        "utilityProfileDescription": "The uploaded video is not influencing live utility.",
         "traceLabel": "Deep Drop",
         "algorithmLabel": "Greedy Throughput Baseline"
       },
@@ -515,6 +607,10 @@
         "switchingRate": 0.41025641025641024,
         "qoe": -2.039176930809145,
         "playbackDurationSeconds": 80,
+        "contentAwareUtility": false,
+        "utilityProfileLabel": "Generic bitrate-only utility",
+        "utilityProfileShortLabel": "Bitrate only",
+        "utilityProfileDescription": "The uploaded video is not influencing live utility.",
         "traceLabel": "Deep Drop",
         "algorithmLabel": "HYB-like Throughput Baseline"
       }

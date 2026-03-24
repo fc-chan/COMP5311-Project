@@ -3,11 +3,14 @@ import { ABR_ALGORITHMS } from "./core/algorithms.js";
 import { AbrSimulator, BITRATE_LADDER_MBPS, CHUNK_DURATION } from "./core/simulator.js";
 import { createMetricsTracker, formatSummaryMetrics } from "./core/metrics.js";
 import { loadTraceCatalog } from "./core/traces.js";
+import { analyzeLocalVideoSource } from "./core/video_profile.js";
 
 const STEP_INTERVAL_MS = 650;
 const VISUAL_PLAYBACK_RATE = CHUNK_DURATION / (STEP_INTERVAL_MS / 1000);
-const BASELINE_SELECTION_HINT =
-  "Select HYB-like, BOLA-like, or Greedy to place it against SODA.";
+const DEFAULT_PROCESS_UPLOAD_HINT =
+  "Upload one local video. The simulator will reuse the same source video for the main player, then map bitrate decisions to visible quality changes, rebuffer freezes, and a content-aware live utility model.";
+const DEFAULT_COMPARISON_UPLOAD_HINT =
+  "Upload two local videos. The left lane always uses SODA, the right lane follows the selected baseline, and these uploads only affect this comparison workspace.";
 const QUALITY_LABELS = [
   "240p-like",
   "360p-like",
@@ -19,14 +22,28 @@ const QUALITY_LABELS = [
 ];
 
 const ui = {
-  algorithmSelect: document.querySelector("#algorithm-select"),
-  scenarioSelect: document.querySelector("#scenario-select"),
-  startBtn: document.querySelector("#start-btn"),
-  pauseBtn: document.querySelector("#pause-btn"),
-  resetBtn: document.querySelector("#reset-btn"),
-  videoUpload: document.querySelector("#video-upload"),
-  clearVideoBtn: document.querySelector("#clear-video-btn"),
-  scenarioDescription: document.querySelector("#scenario-description"),
+  screenTabs: Array.from(document.querySelectorAll("[data-screen-target]")),
+  screenPanels: Array.from(document.querySelectorAll("[data-screen]")),
+  processAlgorithmSelect: document.querySelector("#algorithm-select"),
+  processScenarioSelect: document.querySelector("#scenario-select"),
+  processStartBtn: document.querySelector("#start-btn"),
+  processPauseBtn: document.querySelector("#pause-btn"),
+  processResetBtn: document.querySelector("#reset-btn"),
+  processVideoUpload: document.querySelector("#video-upload"),
+  processClearVideoBtn: document.querySelector("#clear-video-btn"),
+  processUploadHint: document.querySelector("#upload-hint"),
+  processScenarioDescription: document.querySelector("#scenario-description"),
+  compareAlgorithmSelect: document.querySelector("#compare-algorithm-select"),
+  compareScenarioSelect: document.querySelector("#compare-scenario-select"),
+  compareStartBtn: document.querySelector("#compare-start-btn"),
+  comparePauseBtn: document.querySelector("#compare-pause-btn"),
+  compareResetBtn: document.querySelector("#compare-reset-btn"),
+  compareLeftVideoUpload: document.querySelector("#compare-left-video-upload"),
+  compareLeftClearBtn: document.querySelector("#compare-left-clear-btn"),
+  compareRightVideoUpload: document.querySelector("#compare-right-video-upload"),
+  compareRightClearBtn: document.querySelector("#compare-right-clear-btn"),
+  compareUploadHint: document.querySelector("#compare-upload-hint"),
+  compareScenarioDescription: document.querySelector("#compare-scenario-description"),
   showdownTitle: document.querySelector("#showdown-title"),
   showdownCopy: document.querySelector("#showdown-copy"),
   compareLeftLabel: document.querySelector("#compare-left-label"),
@@ -65,7 +82,7 @@ const chartStyles = {
 };
 
 const previews = {
-  main: createPreviewController({
+  process: createPreviewController({
     root: document.querySelector("#video-preview"),
     video: document.querySelector("#local-video"),
     emptyState: document.querySelector("#video-empty-state"),
@@ -82,7 +99,7 @@ const previews = {
     qualityBadge: document.querySelector("#compare-left-quality"),
     statusCopy: document.querySelector("#compare-left-status"),
     stallOverlay: document.querySelector("#compare-left-stall"),
-    emptyMessage: "Upload a local video to start the side-by-side comparison.",
+    emptyMessage: "Upload the left comparison video for SODA.",
   }),
   compareRight: createPreviewController({
     root: document.querySelector("#compare-right-preview"),
@@ -91,16 +108,40 @@ const previews = {
     qualityBadge: document.querySelector("#compare-right-quality"),
     statusCopy: document.querySelector("#compare-right-status"),
     stallOverlay: document.querySelector("#compare-right-stall"),
-    emptyMessage: BASELINE_SELECTION_HINT,
+    emptyMessage: "Upload the right comparison video for the selected baseline.",
   }),
+};
+
+const processState = {
+  algorithmId: "soda",
+  traceId: null,
+  session: null,
+  timerId: null,
+  videoUrl: null,
+  utilityProfile: null,
+  isProfileLoading: false,
+  profileRequestId: 0,
+};
+
+const comparisonState = {
+  baselineAlgorithmId: "greedy",
+  traceId: null,
+  sodaSession: null,
+  baselineSession: null,
+  timerId: null,
+  leftVideoUrl: null,
+  rightVideoUrl: null,
+  leftUtilityProfile: null,
+  rightUtilityProfile: null,
+  leftProfileLoading: false,
+  rightProfileLoading: false,
+  leftProfileRequestId: 0,
+  rightProfileRequestId: 0,
 };
 
 let traceCatalog = [];
 let batchResults = null;
-let mainSession = null;
-let compareSodaSession = null;
-let timerId = null;
-let localVideoUrl = null;
+let activeScreen = "workspace";
 
 function createPreviewController({
   root,
@@ -133,28 +174,104 @@ function formatSignedPercent(value, digits = 1) {
   return `${prefix}${value.toFixed(digits)}%`;
 }
 
+function getTraceById(traceId) {
+  return traceCatalog.find((trace) => trace.id === traceId);
+}
+
+function getAlgorithmSpec(algorithmId) {
+  return ABR_ALGORITHMS[algorithmId];
+}
+
+function pauseActiveScreen(screenId) {
+  if (screenId === "workspace") {
+    pauseProcessLoop({ render: false });
+  } else if (screenId === "comparison") {
+    pauseComparisonLoop({ render: false });
+  }
+}
+
+function getProcessUploadHintText() {
+  if (processState.isProfileLoading) {
+    return "Analyzing the uploaded video for this workspace. The live process metrics will refresh when the profile is ready.";
+  }
+
+  if (processState.utilityProfile) {
+    return `Workspace utility model: ${processState.utilityProfile.description}. This upload only affects the first workspace.`;
+  }
+
+  return DEFAULT_PROCESS_UPLOAD_HINT;
+}
+
+function getComparisonUploadHintText() {
+  if (comparisonState.leftProfileLoading || comparisonState.rightProfileLoading) {
+    return "Analyzing one of the comparison videos. The showdown summaries will refresh when both lane profiles are ready.";
+  }
+
+  const activeProfiles = [];
+  if (comparisonState.leftUtilityProfile) {
+    activeProfiles.push(`left ${comparisonState.leftUtilityProfile.description}`);
+  }
+  if (comparisonState.rightUtilityProfile) {
+    activeProfiles.push(`right ${comparisonState.rightUtilityProfile.description}`);
+  }
+
+  if (activeProfiles.length > 0) {
+    return `Comparison utility models active: ${activeProfiles.join(" | ")}. These uploads only affect the second workspace.`;
+  }
+
+  return DEFAULT_COMPARISON_UPLOAD_HINT;
+}
+
 function populateSelectors() {
   Object.entries(ABR_ALGORITHMS).forEach(([id, spec]) => {
-    const option = document.createElement("option");
-    option.value = id;
-    option.textContent = spec.label;
-    ui.algorithmSelect.appendChild(option);
+    const processOption = document.createElement("option");
+    processOption.value = id;
+    processOption.textContent = spec.label;
+    ui.processAlgorithmSelect.appendChild(processOption);
+
+    if (id !== "soda") {
+      const compareOption = document.createElement("option");
+      compareOption.value = id;
+      compareOption.textContent = spec.label;
+      ui.compareAlgorithmSelect.appendChild(compareOption);
+    }
   });
 
   traceCatalog.forEach((trace) => {
-    const option = document.createElement("option");
-    option.value = trace.id;
-    option.textContent = trace.label;
-    ui.scenarioSelect.appendChild(option);
+    const processOption = document.createElement("option");
+    processOption.value = trace.id;
+    processOption.textContent = trace.label;
+    ui.processScenarioSelect.appendChild(processOption);
+
+    const compareOption = document.createElement("option");
+    compareOption.value = trace.id;
+    compareOption.textContent = trace.label;
+    ui.compareScenarioSelect.appendChild(compareOption);
   });
 }
 
-function getSelectedTrace() {
-  return traceCatalog.find((trace) => trace.id === ui.scenarioSelect.value);
-}
+function setActiveScreen(screenId) {
+  if (activeScreen !== screenId) {
+    pauseActiveScreen(activeScreen);
+  }
 
-function getSelectedAlgorithmSpec() {
-  return ABR_ALGORITHMS[ui.algorithmSelect.value];
+  activeScreen = screenId;
+
+  ui.screenTabs.forEach((tab) => {
+    const isActive = tab.dataset.screenTarget === screenId;
+    tab.classList.toggle("is-active", isActive);
+    tab.setAttribute("aria-selected", String(isActive));
+  });
+
+  ui.screenPanels.forEach((panel) => {
+    const isActive = panel.dataset.screen === screenId;
+    panel.classList.toggle("is-active", isActive);
+    panel.hidden = !isActive;
+  });
+
+  window.requestAnimationFrame(() => {
+    renderAll();
+  });
 }
 
 async function loadBatchResults() {
@@ -169,8 +286,8 @@ async function loadBatchResults() {
   }
 }
 
-function createAbrSession(algorithmId, trace) {
-  const algorithmSpec = ABR_ALGORITHMS[algorithmId];
+function createAbrSession(algorithmId, trace, utilityProfile = null) {
+  const algorithmSpec = getAlgorithmSpec(algorithmId);
   return {
     algorithmId,
     algorithmSpec,
@@ -189,6 +306,7 @@ function createAbrSession(algorithmId, trace) {
       algorithmId,
       chunkDuration: CHUNK_DURATION,
       bitrateLadderMbps: BITRATE_LADDER_MBPS,
+      utilityProfile,
     }),
   };
 }
@@ -293,7 +411,7 @@ function setPreviewSource(preview, url, emptyMessage = preview.emptyMessage) {
   preview.root.classList.add("has-video");
 }
 
-function syncPreviewToSnapshot(preview, snapshot) {
+function syncPreviewToSnapshot(preview, snapshot, isRunning) {
   if (!snapshot || !previewHasVideo(preview)) {
     return;
   }
@@ -313,7 +431,7 @@ function syncPreviewToSnapshot(preview, snapshot) {
   );
   const drift = Math.abs(preview.video.currentTime - targetTime);
 
-  if (!timerId || preview.stallActive || drift > 0.65) {
+  if (!isRunning || preview.stallActive || drift > 0.65) {
     try {
       preview.video.currentTime = targetTime;
     } catch {
@@ -322,7 +440,7 @@ function syncPreviewToSnapshot(preview, snapshot) {
   }
 }
 
-function renderPreview(preview, snapshot, statusText) {
+function renderPreview(preview, snapshot, statusText, isRunning) {
   const hasVideo = previewHasVideo(preview);
   preview.root.classList.toggle("has-video", hasVideo);
   preview.root.classList.toggle("is-stalled", preview.stallActive);
@@ -347,10 +465,10 @@ function renderPreview(preview, snapshot, statusText) {
   preview.root.style.setProperty("--video-overlay-opacity", (0.42 - normalizedQuality * 0.34).toFixed(2));
   preview.qualityBadge.textContent = `Simulated ${qualityLabel} · ${bitrateMbps.toFixed(2)} Mbps`;
   preview.statusCopy.textContent = statusText;
-  syncPreviewToSnapshot(preview, snapshot);
+  syncPreviewToSnapshot(preview, snapshot, isRunning);
 }
 
-function triggerPreviewStall(preview, stallSeconds) {
+function triggerPreviewStall(preview, stallSeconds, isRunningGetter) {
   if (!previewHasVideo(preview) || stallSeconds <= 0) {
     return;
   }
@@ -365,7 +483,7 @@ function triggerPreviewStall(preview, stallSeconds) {
   preview.stallTimeoutId = window.setTimeout(() => {
     preview.stallActive = false;
     preview.root.classList.remove("is-stalled");
-    if (timerId) {
+    if (isRunningGetter()) {
       playPreview(preview);
     }
     preview.stallTimeoutId = null;
@@ -382,7 +500,10 @@ function renderSummaryCards(container, summary, placeholderText) {
     { label: "QoE", value: summary.qoe.toFixed(3) },
     { label: "Rebuffer", value: formatPercent(summary.rebufferRatio, 2) },
     { label: "Switching", value: formatPercent(summary.switchingRate, 2) },
-    { label: "Mean utility", value: summary.meanUtility.toFixed(3) },
+    {
+      label: summary.contentAwareUtility ? "Mean content utility" : "Mean utility",
+      value: summary.meanUtility.toFixed(3),
+    },
   ];
 
   container.innerHTML = "";
@@ -394,153 +515,339 @@ function renderSummaryCards(container, summary, placeholderText) {
   });
 }
 
-function getShowdownLeftSession() {
-  return mainSession?.algorithmId === "soda" ? mainSession : compareSodaSession;
+function revokeVideoUrl(url) {
+  if (url) {
+    URL.revokeObjectURL(url);
+  }
+  return null;
 }
 
-function getShowdownRightSession() {
-  return mainSession?.algorithmId === "soda" ? null : mainSession;
+function syncProcessPreviewSource() {
+  setPreviewSource(previews.process, processState.videoUrl, previews.process.emptyMessage);
 }
 
-function syncPreviewSources() {
-  const rightShowdownSession = getShowdownRightSession();
-  setPreviewSource(previews.main, localVideoUrl, previews.main.emptyMessage);
-  setPreviewSource(previews.compareLeft, localVideoUrl, previews.compareLeft.emptyMessage);
+function syncComparisonPreviewSources() {
+  setPreviewSource(previews.compareLeft, comparisonState.leftVideoUrl, previews.compareLeft.emptyMessage);
   setPreviewSource(
     previews.compareRight,
-    rightShowdownSession ? localVideoUrl : null,
-    rightShowdownSession ? previews.compareRight.emptyMessage : BASELINE_SELECTION_HINT
+    comparisonState.rightVideoUrl,
+    previews.compareRight.emptyMessage
   );
 }
 
-function clearAllPreviewStalls() {
-  Object.values(previews).forEach(clearPreviewStall);
+function clearProcessPreviewState() {
+  clearPreviewStall(previews.process);
+  resetPreviewPlayback(previews.process);
+  syncProcessPreviewSource();
 }
 
-function pauseAllPreviews() {
-  Object.values(previews).forEach(pausePreview);
+function clearComparisonPreviewState() {
+  clearPreviewStall(previews.compareLeft);
+  clearPreviewStall(previews.compareRight);
+  resetPreviewPlayback(previews.compareLeft);
+  resetPreviewPlayback(previews.compareRight);
+  syncComparisonPreviewSources();
 }
 
-function playActivePreviews() {
-  playPreview(previews.main);
-  playPreview(previews.compareLeft);
-  if (getShowdownRightSession()) {
-    playPreview(previews.compareRight);
-  }
-}
+function buildProcessSession() {
+  const trace = getTraceById(processState.traceId);
+  const algorithmSpec = getAlgorithmSpec(processState.algorithmId);
 
-function resetAllPreviewPlayback() {
-  Object.values(previews).forEach(resetPreviewPlayback);
-}
+  processState.session = createAbrSession(processState.algorithmId, trace, processState.utilityProfile);
+  ui.sessionTitle.textContent = `${algorithmSpec.label} on ${trace.label}`;
+  ui.processScenarioDescription.textContent = processState.utilityProfile
+    ? `${algorithmSpec.description} ${trace.description} Workspace utility model: ${processState.utilityProfile.label.toLowerCase()} (${processState.utilityProfile.description}).`
+    : `${algorithmSpec.description} ${trace.description} Workspace utility model: generic bitrate-only utility.`;
 
-function revokeLocalVideoUrl() {
-  if (!localVideoUrl) {
-    return;
-  }
-  URL.revokeObjectURL(localVideoUrl);
-  localVideoUrl = null;
-}
-
-function clearLocalVideo({ clearInput = true } = {}) {
-  clearAllPreviewStalls();
-  pauseAllPreviews();
-  revokeLocalVideoUrl();
-  syncPreviewSources();
-  if (clearInput) {
-    ui.videoUpload.value = "";
-  }
+  clearProcessPreviewState();
   renderAll();
 }
 
-function handleVideoSelection(event) {
+function buildComparisonSessions() {
+  const trace = getTraceById(comparisonState.traceId);
+  const baselineSpec = getAlgorithmSpec(comparisonState.baselineAlgorithmId);
+
+  comparisonState.sodaSession = createAbrSession("soda", trace, comparisonState.leftUtilityProfile);
+  comparisonState.baselineSession = createAbrSession(
+    comparisonState.baselineAlgorithmId,
+    trace,
+    comparisonState.rightUtilityProfile
+  );
+
+  const leftUtilityCopy = comparisonState.leftUtilityProfile
+    ? `Left utility model: ${comparisonState.leftUtilityProfile.description}.`
+    : "Left utility model: generic bitrate-only utility.";
+  const rightUtilityCopy = comparisonState.rightUtilityProfile
+    ? `Right utility model: ${comparisonState.rightUtilityProfile.description}.`
+    : "Right utility model: generic bitrate-only utility.";
+
+  ui.compareScenarioDescription.textContent = `${baselineSpec.description} ${trace.description} ${leftUtilityCopy} ${rightUtilityCopy}`;
+
+  clearComparisonPreviewState();
+  renderAll();
+}
+
+function startProcessLoop() {
+  if (!processState.session || processState.timerId || processState.session.simulator.isFinished()) {
+    return;
+  }
+  processState.timerId = window.setInterval(stepProcessSession, STEP_INTERVAL_MS);
+  playPreview(previews.process);
+  renderAll();
+}
+
+function pauseProcessLoop({ render = true } = {}) {
+  if (processState.timerId) {
+    window.clearInterval(processState.timerId);
+    processState.timerId = null;
+  }
+  clearPreviewStall(previews.process);
+  pausePreview(previews.process);
+  if (render) {
+    renderAll();
+  }
+}
+
+function resetProcessSession() {
+  pauseProcessLoop({ render: false });
+  buildProcessSession();
+}
+
+function stepProcessSession() {
+  if (!processState.session || processState.session.simulator.isFinished()) {
+    pauseProcessLoop();
+    return;
+  }
+
+  const chunk = stepAbrSession(processState.session);
+  if (chunk?.stallSeconds > 0) {
+    triggerPreviewStall(previews.process, chunk.stallSeconds, () => Boolean(processState.timerId));
+  }
+
+  renderAll();
+
+  if (processState.session.simulator.isFinished()) {
+    pauseProcessLoop();
+  }
+}
+
+function startComparisonLoop() {
+  if (
+    !comparisonState.sodaSession ||
+    !comparisonState.baselineSession ||
+    comparisonState.timerId ||
+    (comparisonState.sodaSession.simulator.isFinished() &&
+      comparisonState.baselineSession.simulator.isFinished())
+  ) {
+    return;
+  }
+
+  comparisonState.timerId = window.setInterval(stepComparisonSessions, STEP_INTERVAL_MS);
+  playPreview(previews.compareLeft);
+  playPreview(previews.compareRight);
+  renderAll();
+}
+
+function pauseComparisonLoop({ render = true } = {}) {
+  if (comparisonState.timerId) {
+    window.clearInterval(comparisonState.timerId);
+    comparisonState.timerId = null;
+  }
+  clearPreviewStall(previews.compareLeft);
+  clearPreviewStall(previews.compareRight);
+  pausePreview(previews.compareLeft);
+  pausePreview(previews.compareRight);
+  if (render) {
+    renderAll();
+  }
+}
+
+function resetComparisonSession() {
+  pauseComparisonLoop({ render: false });
+  buildComparisonSessions();
+}
+
+function stepComparisonSessions() {
+  if (
+    !comparisonState.sodaSession ||
+    !comparisonState.baselineSession ||
+    (comparisonState.sodaSession.simulator.isFinished() &&
+      comparisonState.baselineSession.simulator.isFinished())
+  ) {
+    pauseComparisonLoop();
+    return;
+  }
+
+  const sodaChunk = stepAbrSession(comparisonState.sodaSession);
+  const baselineChunk = stepAbrSession(comparisonState.baselineSession);
+
+  if (sodaChunk?.stallSeconds > 0) {
+    triggerPreviewStall(previews.compareLeft, sodaChunk.stallSeconds, () =>
+      Boolean(comparisonState.timerId)
+    );
+  }
+
+  if (baselineChunk?.stallSeconds > 0) {
+    triggerPreviewStall(previews.compareRight, baselineChunk.stallSeconds, () =>
+      Boolean(comparisonState.timerId)
+    );
+  }
+
+  renderAll();
+
+  if (
+    comparisonState.sodaSession.simulator.isFinished() &&
+    comparisonState.baselineSession.simulator.isFinished()
+  ) {
+    pauseComparisonLoop();
+  }
+}
+
+function clearProcessVideo({ clearInput = true } = {}) {
+  processState.profileRequestId += 1;
+  processState.isProfileLoading = false;
+  processState.utilityProfile = null;
+  pauseProcessLoop({ render: false });
+  processState.videoUrl = revokeVideoUrl(processState.videoUrl);
+  if (clearInput) {
+    ui.processVideoUpload.value = "";
+  }
+  buildProcessSession();
+}
+
+async function handleProcessVideoSelection(event) {
   const [file] = event.target.files ?? [];
   if (!file) {
     return;
   }
 
-  clearAllPreviewStalls();
-  pauseAllPreviews();
-  revokeLocalVideoUrl();
-  localVideoUrl = URL.createObjectURL(file);
-  syncPreviewSources();
+  const requestId = ++processState.profileRequestId;
+  processState.isProfileLoading = true;
+  processState.utilityProfile = null;
+  pauseProcessLoop({ render: false });
+  processState.videoUrl = revokeVideoUrl(processState.videoUrl);
+  processState.videoUrl = URL.createObjectURL(file);
+  syncProcessPreviewSource();
   renderAll();
+
+  try {
+    const profile = await analyzeLocalVideoSource({
+      url: processState.videoUrl,
+      fileName: file.name,
+      bitrateLadderMbps: BITRATE_LADDER_MBPS,
+    });
+
+    if (requestId !== processState.profileRequestId) {
+      return;
+    }
+
+    processState.utilityProfile = profile;
+  } finally {
+    if (requestId !== processState.profileRequestId) {
+      return;
+    }
+
+    processState.isProfileLoading = false;
+    buildProcessSession();
+  }
 }
 
-function buildSessions() {
-  const trace = getSelectedTrace();
-  const selectedAlgorithmId = ui.algorithmSelect.value;
-  const algorithmSpec = getSelectedAlgorithmSpec();
+function clearComparisonVideo(side, { clearInput = true } = {}) {
+  if (side === "left") {
+    comparisonState.leftProfileRequestId += 1;
+    comparisonState.leftProfileLoading = false;
+    comparisonState.leftUtilityProfile = null;
+    comparisonState.leftVideoUrl = revokeVideoUrl(comparisonState.leftVideoUrl);
+    if (clearInput) {
+      ui.compareLeftVideoUpload.value = "";
+    }
+  } else {
+    comparisonState.rightProfileRequestId += 1;
+    comparisonState.rightProfileLoading = false;
+    comparisonState.rightUtilityProfile = null;
+    comparisonState.rightVideoUrl = revokeVideoUrl(comparisonState.rightVideoUrl);
+    if (clearInput) {
+      ui.compareRightVideoUpload.value = "";
+    }
+  }
 
-  mainSession = createAbrSession(selectedAlgorithmId, trace);
-  compareSodaSession =
-    selectedAlgorithmId === "soda" ? null : createAbrSession("soda", trace);
-
-  ui.sessionTitle.textContent = `${algorithmSpec.label} on ${trace.label}`;
-  ui.scenarioDescription.textContent = `${algorithmSpec.description} ${trace.description}`;
-
-  clearAllPreviewStalls();
-  resetAllPreviewPlayback();
-  syncPreviewSources();
-  renderAll();
+  pauseComparisonLoop({ render: false });
+  buildComparisonSessions();
 }
 
-function startLoop() {
-  if (!mainSession || timerId || mainSession.simulator.isFinished()) {
+async function handleComparisonVideoSelection(side, event) {
+  const [file] = event.target.files ?? [];
+  if (!file) {
     return;
   }
-  timerId = window.setInterval(stepSessions, STEP_INTERVAL_MS);
-  playActivePreviews();
-  renderAll();
-}
 
-function pauseLoop() {
-  if (timerId) {
-    window.clearInterval(timerId);
-    timerId = null;
-  }
-  clearAllPreviewStalls();
-  pauseAllPreviews();
-  renderAll();
-}
+  pauseComparisonLoop({ render: false });
 
-function resetSession() {
-  pauseLoop();
-  buildSessions();
-}
+  if (side === "left") {
+    const requestId = ++comparisonState.leftProfileRequestId;
+    comparisonState.leftProfileLoading = true;
+    comparisonState.leftUtilityProfile = null;
+    comparisonState.leftVideoUrl = revokeVideoUrl(comparisonState.leftVideoUrl);
+    comparisonState.leftVideoUrl = URL.createObjectURL(file);
+    syncComparisonPreviewSources();
+    renderAll();
 
-function stepSessions() {
-  if (!mainSession || mainSession.simulator.isFinished()) {
-    pauseLoop();
+    try {
+      const profile = await analyzeLocalVideoSource({
+        url: comparisonState.leftVideoUrl,
+        fileName: file.name,
+        bitrateLadderMbps: BITRATE_LADDER_MBPS,
+      });
+
+      if (requestId !== comparisonState.leftProfileRequestId) {
+        return;
+      }
+
+      comparisonState.leftUtilityProfile = profile;
+    } finally {
+      if (requestId !== comparisonState.leftProfileRequestId) {
+        return;
+      }
+
+      comparisonState.leftProfileLoading = false;
+      buildComparisonSessions();
+    }
     return;
   }
 
-  const mainChunk = stepAbrSession(mainSession);
-  const sodaChunk = stepAbrSession(compareSodaSession);
-  const leftChunk = mainSession.algorithmId === "soda" ? mainChunk : sodaChunk;
-  const rightChunk = getShowdownRightSession() ? mainChunk : null;
-
-  if (mainChunk?.stallSeconds > 0) {
-    triggerPreviewStall(previews.main, mainChunk.stallSeconds);
-  }
-
-  if (leftChunk?.stallSeconds > 0) {
-    triggerPreviewStall(previews.compareLeft, leftChunk.stallSeconds);
-  }
-
-  if (rightChunk?.stallSeconds > 0) {
-    triggerPreviewStall(previews.compareRight, rightChunk.stallSeconds);
-  }
-
+  const requestId = ++comparisonState.rightProfileRequestId;
+  comparisonState.rightProfileLoading = true;
+  comparisonState.rightUtilityProfile = null;
+  comparisonState.rightVideoUrl = revokeVideoUrl(comparisonState.rightVideoUrl);
+  comparisonState.rightVideoUrl = URL.createObjectURL(file);
+  syncComparisonPreviewSources();
   renderAll();
 
-  if (mainSession.simulator.isFinished()) {
-    pauseLoop();
+  try {
+    const profile = await analyzeLocalVideoSource({
+      url: comparisonState.rightVideoUrl,
+      fileName: file.name,
+      bitrateLadderMbps: BITRATE_LADDER_MBPS,
+    });
+
+    if (requestId !== comparisonState.rightProfileRequestId) {
+      return;
+    }
+
+    comparisonState.rightUtilityProfile = profile;
+  } finally {
+    if (requestId !== comparisonState.rightProfileRequestId) {
+      return;
+    }
+
+    comparisonState.rightProfileLoading = false;
+    buildComparisonSessions();
   }
 }
 
-function getPreviewStatusText(session, preview, label) {
+function getPreviewStatusText(session, preview, label, isRunning, emptyMessage) {
   if (!session) {
-    return "Select HYB-like, BOLA-like, or Greedy to activate this lane.";
+    return emptyMessage;
   }
 
   const snapshot = getSessionSnapshot(session);
@@ -556,11 +863,11 @@ function getPreviewStatusText(session, preview, label) {
     return `${label} is freezing to visualize a rebuffer event.`;
   }
 
-  if (timerId) {
-    return `${label} is replaying the same trace under synchronized timing.`;
+  if (isRunning) {
+    return `${label} is replaying the selected trace under synchronized timing.`;
   }
 
-  return `${label} is paused. Use Start to continue the comparison.`;
+  return `${label} is paused. Use Start to continue the run.`;
 }
 
 function renderMainMetrics(summary) {
@@ -570,183 +877,6 @@ function renderMainMetrics(summary) {
     card.className = "metric-card";
     card.innerHTML = `<span>${item.label}</span><strong>${item.value}</strong>`;
     ui.metricsGrid.appendChild(card);
-  });
-}
-
-function renderMainStage() {
-  const snapshot = getSessionSnapshot(mainSession);
-  const summary = getSessionSummary(mainSession);
-
-  ui.currentBitrate.textContent = `${snapshot.currentBitrateMbps.toFixed(2)} Mbps`;
-  ui.currentThroughput.textContent = `${snapshot.lastThroughputMbps.toFixed(2)} Mbps`;
-  ui.currentBuffer.textContent = `${snapshot.bufferSeconds.toFixed(1)} s`;
-  ui.playbackPosition.textContent = `Playback ${snapshot.playbackPosition.toFixed(1)} s`;
-  ui.elapsedTime.textContent = `Elapsed ${snapshot.elapsedTime.toFixed(1)} s`;
-
-  const traceDuration = snapshot.totalChunks * CHUNK_DURATION;
-  ui.playbackProgress.style.width = `${Math.min(100, (snapshot.playbackPosition / traceDuration) * 100)}%`;
-  ui.bufferProgress.style.width = `${Math.min(100, (snapshot.bufferSeconds / mainSession.simulator.maxBuffer) * 100)}%`;
-
-  const isStalling = snapshot.lastStallSeconds > 0;
-  ui.stallIndicator.textContent = isStalling
-    ? `Stalling ${snapshot.lastStallSeconds.toFixed(1)} s`
-    : "Smooth";
-  ui.stallIndicator.classList.toggle("stalling", isStalling);
-
-  renderMainMetrics(summary);
-  renderDecisionLog(snapshot.history);
-  renderPreview(
-    previews.main,
-    snapshot,
-    getPreviewStatusText(mainSession, previews.main, mainSession.algorithmSpec.label)
-  );
-  drawLineChart(ui.throughputChart, snapshot.history, {
-    accessor: (item) => item.actualThroughputMbps,
-    label: "Mbps",
-    maxValue: Math.max(...snapshot.traceSamples, ...BITRATE_LADDER_MBPS, 1),
-    style: chartStyles.throughput,
-    stalls: snapshot.history,
-  });
-  drawLineChart(ui.bitrateChart, snapshot.history, {
-    accessor: (item) => item.selectedBitrateMbps,
-    label: "Mbps",
-    maxValue: BITRATE_LADDER_MBPS[BITRATE_LADDER_MBPS.length - 1],
-    style: chartStyles.bitrate,
-    stalls: snapshot.history,
-    step: true,
-  });
-  drawLineChart(ui.bufferChart, snapshot.history, {
-    accessor: (item) => item.bufferAfterSeconds,
-    label: "sec",
-    maxValue: mainSession.simulator.maxBuffer,
-    style: chartStyles.buffer,
-    stalls: snapshot.history,
-  });
-}
-
-function renderShowdownStage() {
-  const leftSession = getShowdownLeftSession();
-  const rightSession = getShowdownRightSession();
-  const trace = getSelectedTrace();
-
-  ui.compareLeftLabel.textContent = "SODA (paper reproduction)";
-  ui.compareRightLabel.textContent = rightSession
-    ? rightSession.algorithmSpec.label
-    : "Choose a baseline";
-
-  if (rightSession) {
-    ui.showdownTitle.textContent = `SODA vs ${rightSession.algorithmSpec.label} on ${trace.label}`;
-    ui.showdownCopy.textContent =
-      "Both panes replay the same local video under the same trace. The only difference is the ABR controller.";
-  } else {
-    ui.showdownTitle.textContent = "Select a non-SODA algorithm to activate the right lane";
-    ui.showdownCopy.textContent =
-      "The left lane always stays on SODA. Choose HYB-like, BOLA-like, or Greedy to create a true side-by-side showdown.";
-  }
-
-  renderPreview(
-    previews.compareLeft,
-    getSessionSnapshot(leftSession),
-    getPreviewStatusText(leftSession, previews.compareLeft, "SODA")
-  );
-  renderSummaryCards(
-    ui.compareLeftSummary,
-    getSessionSummary(leftSession),
-    "SODA metrics will appear here once the session is initialized."
-  );
-
-  renderPreview(
-    previews.compareRight,
-    getSessionSnapshot(rightSession),
-    getPreviewStatusText(rightSession, previews.compareRight, rightSession?.algorithmSpec.label ?? "The right lane")
-  );
-  renderSummaryCards(
-    ui.compareRightSummary,
-    getSessionSummary(rightSession),
-    BASELINE_SELECTION_HINT
-  );
-}
-
-function renderComparisonTable() {
-  const selectedTrace = getSelectedTrace();
-  const selectedAlgorithmId = ui.algorithmSelect.value;
-
-  if (!batchResults || !selectedTrace) {
-    ui.comparisonTitle.textContent = "Batch evaluation unavailable";
-    ui.comparisonCopy.textContent =
-      "Run `npm run eval` in the project root to regenerate the offline comparison results.";
-    ui.comparisonHighlights.innerHTML = "";
-    ui.comparisonBody.innerHTML = "";
-    ui.solverNote.textContent =
-      "The live simulator still works, but the paper-style summary table depends on generated result artifacts.";
-    return;
-  }
-
-  const traceRows = batchResults.byTrace[selectedTrace.id] ?? [];
-  const overview = batchResults.overview;
-  const aggregateById = Object.fromEntries(
-    batchResults.aggregate.map((row) => [row.algorithmId, row])
-  );
-
-  ui.comparisonTitle.textContent = `Paper-style comparison on ${selectedTrace.label}`;
-  ui.comparisonCopy.textContent =
-    "Rows are ranked by paper QoE = mean utility - 10 × rebuffer ratio - switching rate.";
-
-  const highlightCards = [
-    {
-      label: "Overall best QoE",
-      value: `SODA ${aggregateById.soda.qoe.toFixed(3)}`,
-      detail: `${formatSignedPercent(overview.sodaVsBestBaseline.qoeGainPercent)} vs ${overview.sodaVsBestBaseline.baselineAlgorithmLabel}`,
-    },
-    {
-      label: "Switching reduction vs BOLA-like",
-      value: formatSignedPercent(overview.sodaVsBola.switchingReductionPercent),
-      detail: `Aggregate switching rate ${formatPercent(aggregateById.soda.switchingRate)} vs ${formatPercent(aggregateById.bola.switchingRate)}`,
-    },
-    {
-      label: "Approx solver fidelity",
-      value: formatPercent(overview.solverComparison.agreementRate),
-      detail: `${overview.solverComparison.speedup.toFixed(1)}x fewer trajectories than exact search`,
-    },
-  ];
-
-  ui.comparisonHighlights.innerHTML = "";
-  highlightCards.forEach((card) => {
-    const element = document.createElement("article");
-    element.className = "comparison-highlight";
-    element.innerHTML = `<span>${card.label}</span><strong>${card.value}</strong><p>${card.detail}</p>`;
-    ui.comparisonHighlights.appendChild(element);
-  });
-
-  ui.solverNote.textContent =
-    `SODA keeps aggregate rebuffer ratio at ${formatPercent(aggregateById.soda.rebufferRatio, 2)}. Compared with the greedy throughput baseline, that is ${formatSignedPercent(
-      overview.sodaVsGreedy.rebufferReductionPercent
-    )} less rebuffering.`;
-
-  ui.comparisonBody.innerHTML = "";
-  traceRows.forEach((row, index) => {
-    const tableRow = document.createElement("tr");
-    const rowClasses = [];
-    if (row.algorithmId === "soda") {
-      rowClasses.push("comparison-row-soda");
-    }
-    if (row.algorithmId === selectedAlgorithmId) {
-      rowClasses.push("comparison-row-active");
-    }
-    if (index === 0) {
-      rowClasses.push("comparison-row-best");
-    }
-    tableRow.className = rowClasses.join(" ");
-    tableRow.innerHTML = `
-      <td>${row.algorithmLabel}</td>
-      <td>${row.meanUtility.toFixed(3)}</td>
-      <td>${formatPercent(row.rebufferRatio, 2)}</td>
-      <td>${formatPercent(row.switchingRate, 2)}</td>
-      <td>${row.qoe.toFixed(3)}</td>
-      <td>${row.averageBitrate.toFixed(2)} Mbps</td>
-      <td>${row.totalStallSeconds.toFixed(2)}</td>
-    `;
-    ui.comparisonBody.appendChild(tableRow);
   });
 }
 
@@ -769,6 +899,10 @@ function renderDecisionLog(history) {
 
 function drawLineChart(canvas, history, options) {
   const ctx = canvas.getContext("2d");
+  if (!ctx || canvas.clientWidth === 0 || canvas.clientHeight === 0) {
+    return;
+  }
+
   const dpr = window.devicePixelRatio || 1;
   const width = canvas.clientWidth * dpr;
   const height = canvas.clientHeight * dpr;
@@ -789,8 +923,8 @@ function drawLineChart(canvas, history, options) {
 
   ctx.strokeStyle = chartStyles.grid;
   ctx.lineWidth = 1;
-  for (let i = 0; i <= 4; i += 1) {
-    const y = padding.top + (plotHeight / 4) * i;
+  for (let index = 0; index <= 4; index += 1) {
+    const y = padding.top + (plotHeight / 4) * index;
     ctx.beginPath();
     ctx.moveTo(padding.left, y);
     ctx.lineTo(w - padding.right, y);
@@ -858,20 +992,222 @@ function drawLineChart(canvas, history, options) {
   ctx.stroke();
 }
 
-function renderAll() {
-  if (!mainSession) {
+function renderProcessInterface() {
+  if (!processState.session) {
     return;
   }
-  renderMainStage();
-  renderShowdownStage();
+
+  ui.processUploadHint.textContent = getProcessUploadHintText();
+
+  const snapshot = getSessionSnapshot(processState.session);
+  const summary = getSessionSummary(processState.session);
+
+  ui.currentBitrate.textContent = `${snapshot.currentBitrateMbps.toFixed(2)} Mbps`;
+  ui.currentThroughput.textContent = `${snapshot.lastThroughputMbps.toFixed(2)} Mbps`;
+  ui.currentBuffer.textContent = `${snapshot.bufferSeconds.toFixed(1)} s`;
+  ui.playbackPosition.textContent = `Playback ${snapshot.playbackPosition.toFixed(1)} s`;
+  ui.elapsedTime.textContent = `Elapsed ${snapshot.elapsedTime.toFixed(1)} s`;
+
+  const traceDuration = snapshot.totalChunks * CHUNK_DURATION;
+  ui.playbackProgress.style.width = `${Math.min(100, (snapshot.playbackPosition / traceDuration) * 100)}%`;
+  ui.bufferProgress.style.width = `${Math.min(100, (snapshot.bufferSeconds / processState.session.simulator.maxBuffer) * 100)}%`;
+
+  const isStalling = snapshot.lastStallSeconds > 0;
+  ui.stallIndicator.textContent = isStalling
+    ? `Stalling ${snapshot.lastStallSeconds.toFixed(1)} s`
+    : "Smooth";
+  ui.stallIndicator.classList.toggle("stalling", isStalling);
+
+  renderMainMetrics(summary);
+  renderDecisionLog(snapshot.history);
+  renderPreview(
+    previews.process,
+    snapshot,
+    getPreviewStatusText(
+      processState.session,
+      previews.process,
+      processState.session.algorithmSpec.label,
+      Boolean(processState.timerId),
+      previews.process.emptyMessage
+    ),
+    Boolean(processState.timerId)
+  );
+
+  drawLineChart(ui.throughputChart, snapshot.history, {
+    accessor: (item) => item.actualThroughputMbps,
+    label: "Mbps",
+    maxValue: Math.max(...snapshot.traceSamples, ...BITRATE_LADDER_MBPS, 1),
+    style: chartStyles.throughput,
+    stalls: snapshot.history,
+  });
+  drawLineChart(ui.bitrateChart, snapshot.history, {
+    accessor: (item) => item.selectedBitrateMbps,
+    label: "Mbps",
+    maxValue: BITRATE_LADDER_MBPS[BITRATE_LADDER_MBPS.length - 1],
+    style: chartStyles.bitrate,
+    stalls: snapshot.history,
+    step: true,
+  });
+  drawLineChart(ui.bufferChart, snapshot.history, {
+    accessor: (item) => item.bufferAfterSeconds,
+    label: "sec",
+    maxValue: processState.session.simulator.maxBuffer,
+    style: chartStyles.buffer,
+    stalls: snapshot.history,
+  });
+}
+
+function renderComparisonShowdown() {
+  if (!comparisonState.sodaSession || !comparisonState.baselineSession) {
+    return;
+  }
+
+  const trace = getTraceById(comparisonState.traceId);
+  const baselineSpec = getAlgorithmSpec(comparisonState.baselineAlgorithmId);
+  const leftSummary = getSessionSummary(comparisonState.sodaSession);
+  const rightSummary = getSessionSummary(comparisonState.baselineSession);
+
+  ui.compareUploadHint.textContent = getComparisonUploadHintText();
+  ui.compareLeftLabel.textContent = "SODA (paper reproduction)";
+  ui.compareRightLabel.textContent = baselineSpec.label;
+  ui.showdownTitle.textContent = `SODA vs ${baselineSpec.label} on ${trace.label}`;
+  ui.showdownCopy.textContent =
+    "Both lanes replay the same trace under independent control-panel settings. Left uses SODA, right uses the selected baseline.";
+
+  renderPreview(
+    previews.compareLeft,
+    getSessionSnapshot(comparisonState.sodaSession),
+    getPreviewStatusText(
+      comparisonState.sodaSession,
+      previews.compareLeft,
+      "SODA",
+      Boolean(comparisonState.timerId),
+      previews.compareLeft.emptyMessage
+    ),
+    Boolean(comparisonState.timerId)
+  );
+  renderPreview(
+    previews.compareRight,
+    getSessionSnapshot(comparisonState.baselineSession),
+    getPreviewStatusText(
+      comparisonState.baselineSession,
+      previews.compareRight,
+      baselineSpec.label,
+      Boolean(comparisonState.timerId),
+      previews.compareRight.emptyMessage
+    ),
+    Boolean(comparisonState.timerId)
+  );
+
+  renderSummaryCards(
+    ui.compareLeftSummary,
+    leftSummary,
+    "Upload the left comparison video and start the showdown to populate this lane."
+  );
+  renderSummaryCards(
+    ui.compareRightSummary,
+    rightSummary,
+    "Upload the right comparison video and start the showdown to populate this lane."
+  );
+}
+
+function renderComparisonTable() {
+  const selectedTrace = getTraceById(comparisonState.traceId);
+  const selectedAlgorithmId = comparisonState.baselineAlgorithmId;
+
+  if (!batchResults || !selectedTrace) {
+    ui.comparisonTitle.textContent = "Batch evaluation unavailable";
+    ui.comparisonCopy.textContent =
+      "Run `npm run eval` in the project root to regenerate the offline comparison results.";
+    ui.comparisonHighlights.innerHTML = "";
+    ui.comparisonBody.innerHTML = "";
+    ui.solverNote.textContent =
+      "The comparison workspace still runs live, but the paper-style table depends on generated result artifacts.";
+    return;
+  }
+
+  const traceRows = batchResults.byTrace[selectedTrace.id] ?? [];
+  const overview = batchResults.overview;
+  const aggregateById = Object.fromEntries(
+    batchResults.aggregate.map((row) => [row.algorithmId, row])
+  );
+
+  ui.comparisonTitle.textContent = `Paper-style comparison on ${selectedTrace.label}`;
+  ui.comparisonCopy.textContent =
+    comparisonState.leftUtilityProfile || comparisonState.rightUtilityProfile
+      ? "Rows are ranked by paper QoE = mean utility - 10 x rebuffer ratio - switching rate. Uploaded comparison videos only change the live showdown summaries above."
+      : "Rows are ranked by paper QoE = mean utility - 10 x rebuffer ratio - switching rate.";
+
+  const highlightCards = [
+    {
+      label: "Overall best QoE",
+      value: `SODA ${aggregateById.soda.qoe.toFixed(3)}`,
+      detail: `${formatSignedPercent(overview.sodaVsBestBaseline.qoeGainPercent)} vs ${overview.sodaVsBestBaseline.baselineAlgorithmLabel}`,
+    },
+    {
+      label: "Switching reduction vs BOLA-like",
+      value: formatSignedPercent(overview.sodaVsBola.switchingReductionPercent),
+      detail: `Aggregate switching rate ${formatPercent(aggregateById.soda.switchingRate)} vs ${formatPercent(aggregateById.bola.switchingRate)}`,
+    },
+    {
+      label: "Approx solver fidelity",
+      value: formatPercent(overview.solverComparison.agreementRate),
+      detail: `${overview.solverComparison.speedup.toFixed(1)}x fewer trajectories than exact search`,
+    },
+  ];
+
+  ui.comparisonHighlights.innerHTML = "";
+  highlightCards.forEach((card) => {
+    const element = document.createElement("article");
+    element.className = "comparison-highlight";
+    element.innerHTML = `<span>${card.label}</span><strong>${card.value}</strong><p>${card.detail}</p>`;
+    ui.comparisonHighlights.appendChild(element);
+  });
+
+  ui.solverNote.textContent =
+    `SODA keeps aggregate rebuffer ratio at ${formatPercent(aggregateById.soda.rebufferRatio, 2)}. Compared with the greedy throughput baseline, that is ${formatSignedPercent(
+      overview.sodaVsGreedy.rebufferReductionPercent
+    )} less rebuffering.`;
+
+  ui.comparisonBody.innerHTML = "";
+  traceRows.forEach((row, index) => {
+    const rowClasses = [];
+    if (row.algorithmId === "soda") {
+      rowClasses.push("comparison-row-soda");
+    }
+    if (row.algorithmId === selectedAlgorithmId) {
+      rowClasses.push("comparison-row-active");
+    }
+    if (index === 0) {
+      rowClasses.push("comparison-row-best");
+    }
+
+    const tableRow = document.createElement("tr");
+    tableRow.className = rowClasses.join(" ");
+    tableRow.innerHTML = `
+      <td>${row.algorithmLabel}</td>
+      <td>${row.meanUtility.toFixed(3)}</td>
+      <td>${formatPercent(row.rebufferRatio, 2)}</td>
+      <td>${formatPercent(row.switchingRate, 2)}</td>
+      <td>${row.qoe.toFixed(3)}</td>
+      <td>${row.averageBitrate.toFixed(2)} Mbps</td>
+      <td>${row.totalStallSeconds.toFixed(2)}</td>
+    `;
+    ui.comparisonBody.appendChild(tableRow);
+  });
+}
+
+function renderAll() {
+  renderProcessInterface();
+  renderComparisonShowdown();
   renderComparisonTable();
 }
 
-function attachPreviewLoadedMetadataHandler(preview, sessionGetter) {
+function attachPreviewLoadedMetadataHandler(preview, sessionGetter, isRunningGetter) {
   preview.video.addEventListener("loadedmetadata", () => {
     const session = sessionGetter();
-    syncPreviewToSnapshot(preview, getSessionSnapshot(session));
-    if (timerId) {
+    syncPreviewToSnapshot(preview, getSessionSnapshot(session), isRunningGetter());
+    if (isRunningGetter()) {
       playPreview(preview);
     }
   });
@@ -884,24 +1220,79 @@ async function init() {
   ]);
 
   populateSelectors();
-  ui.algorithmSelect.value = "soda";
-  ui.scenarioSelect.value = traceCatalog[0].id;
 
-  attachPreviewLoadedMetadataHandler(previews.main, () => mainSession);
-  attachPreviewLoadedMetadataHandler(previews.compareLeft, () => getShowdownLeftSession());
-  attachPreviewLoadedMetadataHandler(previews.compareRight, () => getShowdownRightSession());
+  processState.traceId = traceCatalog[0].id;
+  comparisonState.traceId = traceCatalog[0].id;
 
-  buildSessions();
+  ui.processAlgorithmSelect.value = processState.algorithmId;
+  ui.processScenarioSelect.value = processState.traceId;
+  ui.compareAlgorithmSelect.value = comparisonState.baselineAlgorithmId;
+  ui.compareScenarioSelect.value = comparisonState.traceId;
 
-  ui.algorithmSelect.addEventListener("change", resetSession);
-  ui.scenarioSelect.addEventListener("change", resetSession);
-  ui.startBtn.addEventListener("click", startLoop);
-  ui.pauseBtn.addEventListener("click", pauseLoop);
-  ui.resetBtn.addEventListener("click", resetSession);
-  ui.videoUpload.addEventListener("change", handleVideoSelection);
-  ui.clearVideoBtn.addEventListener("click", () => clearLocalVideo());
+  attachPreviewLoadedMetadataHandler(
+    previews.process,
+    () => processState.session,
+    () => Boolean(processState.timerId)
+  );
+  attachPreviewLoadedMetadataHandler(
+    previews.compareLeft,
+    () => comparisonState.sodaSession,
+    () => Boolean(comparisonState.timerId)
+  );
+  attachPreviewLoadedMetadataHandler(
+    previews.compareRight,
+    () => comparisonState.baselineSession,
+    () => Boolean(comparisonState.timerId)
+  );
+
+  buildProcessSession();
+  buildComparisonSessions();
+  setActiveScreen(activeScreen);
+
+  ui.screenTabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      setActiveScreen(tab.dataset.screenTarget);
+    });
+  });
+
+  ui.processAlgorithmSelect.addEventListener("change", () => {
+    processState.algorithmId = ui.processAlgorithmSelect.value;
+    resetProcessSession();
+  });
+  ui.processScenarioSelect.addEventListener("change", () => {
+    processState.traceId = ui.processScenarioSelect.value;
+    resetProcessSession();
+  });
+  ui.processStartBtn.addEventListener("click", startProcessLoop);
+  ui.processPauseBtn.addEventListener("click", () => pauseProcessLoop());
+  ui.processResetBtn.addEventListener("click", resetProcessSession);
+  ui.processVideoUpload.addEventListener("change", handleProcessVideoSelection);
+  ui.processClearVideoBtn.addEventListener("click", () => clearProcessVideo());
+
+  ui.compareAlgorithmSelect.addEventListener("change", () => {
+    comparisonState.baselineAlgorithmId = ui.compareAlgorithmSelect.value;
+    resetComparisonSession();
+  });
+  ui.compareScenarioSelect.addEventListener("change", () => {
+    comparisonState.traceId = ui.compareScenarioSelect.value;
+    resetComparisonSession();
+  });
+  ui.compareStartBtn.addEventListener("click", startComparisonLoop);
+  ui.comparePauseBtn.addEventListener("click", () => pauseComparisonLoop());
+  ui.compareResetBtn.addEventListener("click", resetComparisonSession);
+  ui.compareLeftVideoUpload.addEventListener("change", (event) =>
+    handleComparisonVideoSelection("left", event)
+  );
+  ui.compareRightVideoUpload.addEventListener("change", (event) =>
+    handleComparisonVideoSelection("right", event)
+  );
+  ui.compareLeftClearBtn.addEventListener("click", () => clearComparisonVideo("left"));
+  ui.compareRightClearBtn.addEventListener("click", () => clearComparisonVideo("right"));
+
   window.addEventListener("beforeunload", () => {
-    revokeLocalVideoUrl();
+    processState.videoUrl = revokeVideoUrl(processState.videoUrl);
+    comparisonState.leftVideoUrl = revokeVideoUrl(comparisonState.leftVideoUrl);
+    comparisonState.rightVideoUrl = revokeVideoUrl(comparisonState.rightVideoUrl);
   });
   window.addEventListener("resize", renderAll);
 }

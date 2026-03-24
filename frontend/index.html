@@ -24,239 +24,313 @@
       </div>
     </header>
 
+    <section class="screen-nav-card">
+      <div>
+        <p class="eyebrow">Two Views</p>
+        <h2>Split the frontend into a process workspace and a comparison workspace</h2>
+      </div>
+      <div class="screen-nav-actions screen-nav-actions-two" role="tablist" aria-label="Frontend interfaces">
+        <button class="screen-tab is-active" id="screen-tab-workspace" data-screen-target="workspace" type="button" aria-selected="true">
+          <span>Interface 1</span>
+          <strong>Workspace</strong>
+          <small>Upload the local video, configure the run, and inspect the step-by-step tracking in one place.</small>
+        </button>
+        <button class="screen-tab" id="screen-tab-comparison" data-screen-target="comparison" type="button" aria-selected="false">
+          <span>Interface 2</span>
+          <strong>Comparison</strong>
+          <small>Use an independent control panel, upload two comparison videos, and review the side-by-side results.</small>
+        </button>
+      </div>
+    </section>
+
     <main class="dashboard">
-      <section class="control-card">
-        <div class="selectors">
-          <label>
-            <span>Algorithm</span>
-            <select id="algorithm-select"></select>
-          </label>
-          <label>
-            <span>Scenario</span>
-            <select id="scenario-select"></select>
-          </label>
-        </div>
-        <div class="upload-controls">
-          <label class="upload-label">
-            <span>Local video preview</span>
-            <input id="video-upload" type="file" accept="video/*">
-          </label>
-          <button id="clear-video-btn" class="btn" type="button">Remove Video</button>
-          <p class="upload-hint" id="upload-hint">
-            Upload one local video. The simulator will reuse the same source video for
-            the main player and the SODA-vs-baseline showdown, then map bitrate
-            decisions to visible quality changes and rebuffer freezes.
+      <section class="screen-panel is-active" id="screen-workspace" data-screen="workspace">
+        <article class="screen-intro-card">
+          <p class="eyebrow">Interface 1</p>
+          <h2>Upload, configure, and trace the playback process</h2>
+          <p class="charts-copy">
+            This screen merges the original setup and process-tracing views. The control panel below only affects this workspace.
           </p>
-        </div>
-        <div class="controls">
-          <button id="start-btn" class="btn btn-primary">Start</button>
-          <button id="pause-btn" class="btn">Pause</button>
-          <button id="reset-btn" class="btn">Reset</button>
-        </div>
-        <div class="scenario-description" id="scenario-description"></div>
-      </section>
+        </article>
 
-      <section class="stage-card">
-        <div class="player-panel">
-          <div class="player-header">
+        <section class="control-card">
+          <div class="selectors">
+            <label>
+              <span>Algorithm</span>
+              <select id="algorithm-select"></select>
+            </label>
+            <label>
+              <span>Scenario</span>
+              <select id="scenario-select"></select>
+            </label>
+          </div>
+          <div class="upload-controls">
+            <label class="upload-label">
+              <span>Local video preview</span>
+              <input id="video-upload" type="file" accept="video/*">
+            </label>
+            <button id="clear-video-btn" class="btn" type="button">Remove Video</button>
+            <p class="upload-hint" id="upload-hint">
+              Upload one local video. The simulator will reuse the same source video for
+              the main player, then map bitrate decisions to visible quality changes,
+              rebuffer freezes, and a content-aware live utility model.
+            </p>
+          </div>
+          <div class="controls">
+            <button id="start-btn" class="btn btn-primary">Start</button>
+            <button id="pause-btn" class="btn">Pause</button>
+            <button id="reset-btn" class="btn">Reset</button>
+          </div>
+          <div class="scenario-description" id="scenario-description"></div>
+        </section>
+
+        <section class="stage-card">
+          <div class="player-panel">
+            <div class="player-header">
+              <div>
+                <p class="eyebrow">Session State</p>
+                <h2 id="session-title">Ready to replay</h2>
+              </div>
+              <div class="status-pill" id="stall-indicator">Smooth</div>
+            </div>
+            <div class="screen">
+              <div class="video-preview" id="video-preview">
+                <video id="local-video" playsinline muted preload="metadata"></video>
+                <div class="video-empty-state" id="video-empty-state">
+                  Upload a local video to turn SODA and baseline decisions into a visible playback demo.
+                </div>
+                <div class="video-quality-badge" id="video-quality-badge">No video loaded</div>
+                <div class="video-status-copy" id="video-status-copy">
+                  The preview is muted and simulates quality layers from the selected bitrate rung.
+                </div>
+                <div class="video-stall-overlay" id="video-stall-overlay">Rebuffering</div>
+              </div>
+              <div class="screen-overlay">
+                <div class="screen-stat">
+                  <span>Current bitrate</span>
+                  <strong id="current-bitrate">0.30 Mbps</strong>
+                </div>
+                <div class="screen-stat">
+                  <span>Estimated throughput</span>
+                  <strong id="current-throughput">0.00 Mbps</strong>
+                </div>
+                <div class="screen-stat">
+                  <span>Buffer</span>
+                  <strong id="current-buffer">0.0 s</strong>
+                </div>
+              </div>
+              <div class="timeline-stack">
+                <div class="timeline-labels">
+                  <span id="playback-position">Playback 0.0 s</span>
+                  <span id="elapsed-time">Elapsed 0.0 s</span>
+                </div>
+                <div class="progress-track">
+                  <div class="progress-fill" id="playback-progress"></div>
+                </div>
+                <div class="buffer-track">
+                  <div class="buffer-fill" id="buffer-progress"></div>
+                </div>
+              </div>
+            </div>
+            <div class="legend">
+              <span><i class="legend-chip throughput-chip"></i>Throughput trace</span>
+              <span><i class="legend-chip bitrate-chip"></i>Selected bitrate</span>
+              <span><i class="legend-chip buffer-chip"></i>Buffer occupancy</span>
+              <span><i class="legend-chip stall-chip"></i>Rebuffer event</span>
+            </div>
+          </div>
+          <div class="metrics-grid" id="metrics-grid"></div>
+        </section>
+
+        <section class="charts-card">
+          <div class="charts-header">
             <div>
-              <p class="eyebrow">Session State</p>
-              <h2 id="session-title">Ready to replay</h2>
+              <p class="eyebrow">Chunk-by-Chunk Behavior</p>
+              <h2>Live metrics</h2>
             </div>
-            <div class="status-pill" id="stall-indicator">Smooth</div>
+            <p class="charts-copy">
+              Each chart updates when a chunk completes downloading.
+            </p>
           </div>
-          <div class="screen">
-            <div class="video-preview" id="video-preview">
-              <video id="local-video" playsinline muted preload="metadata"></video>
-              <div class="video-empty-state" id="video-empty-state">
-                Upload a local video to turn SODA and baseline decisions into a visible playback demo.
+          <div class="charts-grid">
+            <article class="chart-panel">
+              <div class="chart-title-row">
+                <h3>Throughput</h3>
+                <span id="throughput-caption">Trace replay</span>
               </div>
-              <div class="video-quality-badge" id="video-quality-badge">No video loaded</div>
-              <div class="video-status-copy" id="video-status-copy">
-                The preview is muted and simulates quality layers from the selected bitrate rung.
+              <canvas id="throughput-chart" width="640" height="240"></canvas>
+            </article>
+            <article class="chart-panel">
+              <div class="chart-title-row">
+                <h3>Bitrate</h3>
+                <span id="bitrate-caption">ABR decisions</span>
               </div>
-              <div class="video-stall-overlay" id="video-stall-overlay">Rebuffering</div>
-            </div>
-            <div class="screen-overlay">
-              <div class="screen-stat">
-                <span>Current bitrate</span>
-                <strong id="current-bitrate">0.30 Mbps</strong>
+              <canvas id="bitrate-chart" width="640" height="240"></canvas>
+            </article>
+            <article class="chart-panel">
+              <div class="chart-title-row">
+                <h3>Buffer</h3>
+                <span id="buffer-caption">Occupancy and stalls</span>
               </div>
-              <div class="screen-stat">
-                <span>Estimated throughput</span>
-                <strong id="current-throughput">0.00 Mbps</strong>
-              </div>
-              <div class="screen-stat">
-                <span>Buffer</span>
-                <strong id="current-buffer">0.0 s</strong>
-              </div>
-            </div>
-            <div class="timeline-stack">
-              <div class="timeline-labels">
-                <span id="playback-position">Playback 0.0 s</span>
-                <span id="elapsed-time">Elapsed 0.0 s</span>
-              </div>
-              <div class="progress-track">
-                <div class="progress-fill" id="playback-progress"></div>
-              </div>
-              <div class="buffer-track">
-                <div class="buffer-fill" id="buffer-progress"></div>
-              </div>
-            </div>
+              <canvas id="buffer-chart" width="640" height="240"></canvas>
+            </article>
           </div>
-          <div class="legend">
-            <span><i class="legend-chip throughput-chip"></i>Throughput trace</span>
-            <span><i class="legend-chip bitrate-chip"></i>Selected bitrate</span>
-            <span><i class="legend-chip buffer-chip"></i>Buffer occupancy</span>
-            <span><i class="legend-chip stall-chip"></i>Rebuffer event</span>
-          </div>
-        </div>
+        </section>
 
-        <div class="metrics-grid" id="metrics-grid"></div>
+        <section class="table-card">
+          <div class="charts-header">
+            <div>
+              <p class="eyebrow">Decision Log</p>
+              <h2>Recent chunks</h2>
+            </div>
+            <p class="charts-copy">
+              The last eight chunk downloads and adaptation outcomes.
+            </p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Chunk</th>
+                  <th>Predicted Mbps</th>
+                  <th>Actual Mbps</th>
+                  <th>Bitrate Mbps</th>
+                  <th>Download s</th>
+                  <th>Buffer s</th>
+                  <th>Stall s</th>
+                </tr>
+              </thead>
+              <tbody id="decision-log"></tbody>
+            </table>
+          </div>
+        </section>
       </section>
 
-      <section class="showdown-card">
-        <div class="charts-header">
-          <div>
-            <p class="eyebrow">Side-by-Side Video Showdown</p>
-            <h2 id="showdown-title">SODA against the selected baseline</h2>
-          </div>
-          <p class="charts-copy" id="showdown-copy">
-            Upload one local video, then replay the same trace on both panes. The left lane stays on SODA and the right lane follows the selected algorithm.
-          </p>
-        </div>
-        <div class="showdown-grid">
-          <article class="showdown-lane">
-            <div class="showdown-lane-header">
-              <p class="eyebrow">Left lane</p>
-              <h3 id="compare-left-label">SODA (paper reproduction)</h3>
-            </div>
-            <div class="showdown-preview" id="compare-left-preview">
-              <video id="compare-left-video" playsinline muted preload="metadata"></video>
-              <div class="video-empty-state" id="compare-left-empty">
-                Upload a local video to start the side-by-side comparison.
-              </div>
-              <div class="video-quality-badge" id="compare-left-quality">No video loaded</div>
-              <div class="video-status-copy" id="compare-left-status">
-                SODA will stay in the left lane for every showdown.
-              </div>
-              <div class="video-stall-overlay" id="compare-left-stall">Rebuffering</div>
-            </div>
-            <div class="compare-summary-grid" id="compare-left-summary"></div>
-          </article>
-
-          <article class="showdown-lane">
-            <div class="showdown-lane-header">
-              <p class="eyebrow">Right lane</p>
-              <h3 id="compare-right-label">Selected algorithm</h3>
-            </div>
-            <div class="showdown-preview" id="compare-right-preview">
-              <video id="compare-right-video" playsinline muted preload="metadata"></video>
-              <div class="video-empty-state" id="compare-right-empty">
-                Select HYB-like, BOLA-like, or Greedy to place it against SODA.
-              </div>
-              <div class="video-quality-badge" id="compare-right-quality">Comparison waiting</div>
-              <div class="video-status-copy" id="compare-right-status">
-                The right lane becomes active when you choose a non-SODA algorithm.
-              </div>
-              <div class="video-stall-overlay" id="compare-right-stall">Rebuffering</div>
-            </div>
-            <div class="compare-summary-grid" id="compare-right-summary"></div>
-          </article>
-        </div>
-      </section>
-
-      <section class="comparison-card">
-        <div class="charts-header">
-          <div>
-            <p class="eyebrow">Paper-Style Comparison</p>
-            <h2 id="comparison-title">Batch evaluation across all traces</h2>
-          </div>
-          <p class="charts-copy" id="comparison-copy">
-            The table below is generated offline from the same controller implementations used by the live simulator.
-          </p>
-        </div>
-        <div class="comparison-highlights" id="comparison-highlights"></div>
-        <div class="solver-note" id="solver-note"></div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Algorithm</th>
-                <th>Mean utility</th>
-                <th>Rebuffer ratio</th>
-                <th>Switching rate</th>
-                <th>QoE</th>
-                <th>Avg bitrate</th>
-                <th>Stall s</th>
-              </tr>
-            </thead>
-            <tbody id="comparison-body"></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="charts-card">
-        <div class="charts-header">
-          <div>
-            <p class="eyebrow">Chunk-by-Chunk Behavior</p>
-            <h2>Live metrics</h2>
-          </div>
+      <section class="screen-panel" id="screen-comparison" data-screen="comparison">
+        <article class="screen-intro-card">
+          <p class="eyebrow">Interface 2</p>
+          <h2>Independent comparison workspace</h2>
           <p class="charts-copy">
-            Each chart updates when a chunk completes downloading.
+            This screen has its own control panel. Its scenario, baseline algorithm, timers, and uploaded comparison videos do not affect the first workspace.
           </p>
-        </div>
-        <div class="charts-grid">
-          <article class="chart-panel">
-            <div class="chart-title-row">
-              <h3>Throughput</h3>
-              <span id="throughput-caption">Trace replay</span>
-            </div>
-            <canvas id="throughput-chart" width="640" height="240"></canvas>
-          </article>
-          <article class="chart-panel">
-            <div class="chart-title-row">
-              <h3>Bitrate</h3>
-              <span id="bitrate-caption">ABR decisions</span>
-            </div>
-            <canvas id="bitrate-chart" width="640" height="240"></canvas>
-          </article>
-          <article class="chart-panel">
-            <div class="chart-title-row">
-              <h3>Buffer</h3>
-              <span id="buffer-caption">Occupancy and stalls</span>
-            </div>
-            <canvas id="buffer-chart" width="640" height="240"></canvas>
-          </article>
-        </div>
-      </section>
+        </article>
 
-      <section class="table-card">
-        <div class="charts-header">
-          <div>
-            <p class="eyebrow">Decision Log</p>
-            <h2>Recent chunks</h2>
+        <section class="control-card comparison-control-card">
+          <div class="selectors">
+            <label>
+              <span>Baseline algorithm</span>
+              <select id="compare-algorithm-select"></select>
+            </label>
+            <label>
+              <span>Scenario</span>
+              <select id="compare-scenario-select"></select>
+            </label>
           </div>
-          <p class="charts-copy">
-            The last eight chunk downloads and adaptation outcomes.
-          </p>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Chunk</th>
-                <th>Predicted Mbps</th>
-                <th>Actual Mbps</th>
-                <th>Bitrate Mbps</th>
-                <th>Download s</th>
-                <th>Buffer s</th>
-                <th>Stall s</th>
-              </tr>
-            </thead>
-            <tbody id="decision-log"></tbody>
-          </table>
-        </div>
+          <div class="comparison-upload-controls">
+            <div class="compare-upload-grid">
+              <label class="upload-label">
+                <span>Left video for SODA</span>
+                <input id="compare-left-video-upload" type="file" accept="video/*">
+              </label>
+              <button id="compare-left-clear-btn" class="btn" type="button">Remove Left</button>
+              <label class="upload-label">
+                <span>Right video for baseline</span>
+                <input id="compare-right-video-upload" type="file" accept="video/*">
+              </label>
+              <button id="compare-right-clear-btn" class="btn" type="button">Remove Right</button>
+            </div>
+            <p class="upload-hint" id="compare-upload-hint">
+              Upload two local videos. The left lane always uses SODA, the right lane follows the selected baseline, and these uploads only affect this comparison workspace.
+            </p>
+          </div>
+          <div class="controls">
+            <button id="compare-start-btn" class="btn btn-primary">Start</button>
+            <button id="compare-pause-btn" class="btn">Pause</button>
+            <button id="compare-reset-btn" class="btn">Reset</button>
+          </div>
+          <div class="scenario-description" id="compare-scenario-description"></div>
+        </section>
+
+        <section class="showdown-card">
+          <div class="charts-header">
+            <div>
+              <p class="eyebrow">Side-by-Side Video Showdown</p>
+              <h2 id="showdown-title">SODA against the selected baseline</h2>
+            </div>
+            <p class="charts-copy" id="showdown-copy">
+              Upload two local videos, then replay the same trace on both panes. The left lane stays on SODA and the right lane follows the selected baseline.
+            </p>
+          </div>
+          <div class="showdown-grid">
+            <article class="showdown-lane">
+              <div class="showdown-lane-header">
+                <p class="eyebrow">Left lane</p>
+                <h3 id="compare-left-label">SODA (paper reproduction)</h3>
+              </div>
+              <div class="showdown-preview" id="compare-left-preview">
+                <video id="compare-left-video" playsinline muted preload="metadata"></video>
+                <div class="video-empty-state" id="compare-left-empty">
+                  Upload the left comparison video for SODA.
+                </div>
+                <div class="video-quality-badge" id="compare-left-quality">No video loaded</div>
+                <div class="video-status-copy" id="compare-left-status">
+                  The left lane always replays SODA with its own uploaded video.
+                </div>
+                <div class="video-stall-overlay" id="compare-left-stall">Rebuffering</div>
+              </div>
+              <div class="compare-summary-grid" id="compare-left-summary"></div>
+            </article>
+
+            <article class="showdown-lane">
+              <div class="showdown-lane-header">
+                <p class="eyebrow">Right lane</p>
+                <h3 id="compare-right-label">Selected algorithm</h3>
+              </div>
+              <div class="showdown-preview" id="compare-right-preview">
+                <video id="compare-right-video" playsinline muted preload="metadata"></video>
+                <div class="video-empty-state" id="compare-right-empty">
+                  Upload the right comparison video for the selected baseline.
+                </div>
+                <div class="video-quality-badge" id="compare-right-quality">Comparison waiting</div>
+                <div class="video-status-copy" id="compare-right-status">
+                  The right lane replays the selected baseline with its own uploaded video.
+                </div>
+                <div class="video-stall-overlay" id="compare-right-stall">Rebuffering</div>
+              </div>
+              <div class="compare-summary-grid" id="compare-right-summary"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="comparison-card">
+          <div class="charts-header">
+            <div>
+              <p class="eyebrow">Paper-Style Comparison</p>
+              <h2 id="comparison-title">Batch evaluation across all traces</h2>
+            </div>
+            <p class="charts-copy" id="comparison-copy">
+              The table below is generated offline from the same controller implementations used by the live simulator.
+            </p>
+          </div>
+          <div class="comparison-highlights" id="comparison-highlights"></div>
+          <div class="solver-note" id="solver-note"></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Algorithm</th>
+                  <th>Mean utility</th>
+                  <th>Rebuffer ratio</th>
+                  <th>Switching rate</th>
+                  <th>QoE</th>
+                  <th>Avg bitrate</th>
+                  <th>Stall s</th>
+                </tr>
+              </thead>
+              <tbody id="comparison-body"></tbody>
+            </table>
+          </div>
+        </section>
       </section>
     </main>
   </div>
