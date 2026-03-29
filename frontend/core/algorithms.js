@@ -11,7 +11,7 @@ export const ABR_ALGORITHMS = {
   soda: {
     label: "SODA (paper reproduction)",
     description:
-      "Time-based horizon planning with buffer stabilization, switching cost, and the monotonic-search approximation described in the paper.",
+      "Time-based horizon planning with moving-average throughput prediction, buffer stabilization, switching cost, and the monotonic-search approximation described in the paper.",
     factory: () => createSodaController(SODA_REPRODUCTION_OPTIONS),
   },
   hyb: {
