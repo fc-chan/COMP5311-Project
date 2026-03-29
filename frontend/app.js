@@ -10,7 +10,7 @@ const VISUAL_PLAYBACK_RATE = CHUNK_DURATION / (STEP_INTERVAL_MS / 1000);
 const DEFAULT_PROCESS_UPLOAD_HINT =
   "Upload one local video. The simulator will reuse the same source video for the main player, then map bitrate decisions to visible quality changes, rebuffer freezes, and a content-aware live utility model.";
 const DEFAULT_COMPARISON_UPLOAD_HINT =
-  "Upload two local videos. The left lane always uses SODA, the right lane follows the selected baseline, and these uploads only affect this comparison workspace.";
+  "Upload one local video. Both lanes reuse the same source: left for SODA, right for the selected baseline. This upload only affects this comparison workspace.";
 const QUALITY_LABELS = [
   "240p-like",
   "360p-like",
@@ -38,10 +38,8 @@ const ui = {
   compareStartBtn: document.querySelector("#compare-start-btn"),
   comparePauseBtn: document.querySelector("#compare-pause-btn"),
   compareResetBtn: document.querySelector("#compare-reset-btn"),
-  compareLeftVideoUpload: document.querySelector("#compare-left-video-upload"),
-  compareLeftClearBtn: document.querySelector("#compare-left-clear-btn"),
-  compareRightVideoUpload: document.querySelector("#compare-right-video-upload"),
-  compareRightClearBtn: document.querySelector("#compare-right-clear-btn"),
+  compareVideoUpload: document.querySelector("#compare-video-upload"),
+  compareClearVideoBtn: document.querySelector("#compare-clear-btn"),
   compareUploadHint: document.querySelector("#compare-upload-hint"),
   compareScenarioDescription: document.querySelector("#compare-scenario-description"),
   showdownTitle: document.querySelector("#showdown-title"),
@@ -99,7 +97,7 @@ const previews = {
     qualityBadge: document.querySelector("#compare-left-quality"),
     statusCopy: document.querySelector("#compare-left-status"),
     stallOverlay: document.querySelector("#compare-left-stall"),
-    emptyMessage: "Upload the left comparison video for SODA.",
+    emptyMessage: "Upload one comparison video to replay SODA.",
   }),
   compareRight: createPreviewController({
     root: document.querySelector("#compare-right-preview"),
@@ -108,7 +106,7 @@ const previews = {
     qualityBadge: document.querySelector("#compare-right-quality"),
     statusCopy: document.querySelector("#compare-right-status"),
     stallOverlay: document.querySelector("#compare-right-stall"),
-    emptyMessage: "Upload the right comparison video for the selected baseline.",
+    emptyMessage: "Upload one comparison video to replay the selected baseline.",
   }),
 };
 
@@ -129,14 +127,10 @@ const comparisonState = {
   sodaSession: null,
   baselineSession: null,
   timerId: null,
-  leftVideoUrl: null,
-  rightVideoUrl: null,
-  leftUtilityProfile: null,
-  rightUtilityProfile: null,
-  leftProfileLoading: false,
-  rightProfileLoading: false,
-  leftProfileRequestId: 0,
-  rightProfileRequestId: 0,
+  videoUrl: null,
+  utilityProfile: null,
+  isProfileLoading: false,
+  profileRequestId: 0,
 };
 
 let traceCatalog = [];
@@ -203,20 +197,12 @@ function getProcessUploadHintText() {
 }
 
 function getComparisonUploadHintText() {
-  if (comparisonState.leftProfileLoading || comparisonState.rightProfileLoading) {
-    return "Analyzing one of the comparison videos. The showdown summaries will refresh when both lane profiles are ready.";
+  if (comparisonState.isProfileLoading) {
+    return "Analyzing the comparison video. The showdown summaries will refresh when the shared profile is ready.";
   }
 
-  const activeProfiles = [];
-  if (comparisonState.leftUtilityProfile) {
-    activeProfiles.push(`left ${comparisonState.leftUtilityProfile.description}`);
-  }
-  if (comparisonState.rightUtilityProfile) {
-    activeProfiles.push(`right ${comparisonState.rightUtilityProfile.description}`);
-  }
-
-  if (activeProfiles.length > 0) {
-    return `Comparison utility models active: ${activeProfiles.join(" | ")}. These uploads only affect the second workspace.`;
+  if (comparisonState.utilityProfile) {
+    return `Comparison utility model: ${comparisonState.utilityProfile.description}. Both lanes use the same uploaded video in this workspace.`;
   }
 
   return DEFAULT_COMPARISON_UPLOAD_HINT;
@@ -527,12 +513,8 @@ function syncProcessPreviewSource() {
 }
 
 function syncComparisonPreviewSources() {
-  setPreviewSource(previews.compareLeft, comparisonState.leftVideoUrl, previews.compareLeft.emptyMessage);
-  setPreviewSource(
-    previews.compareRight,
-    comparisonState.rightVideoUrl,
-    previews.compareRight.emptyMessage
-  );
+  setPreviewSource(previews.compareLeft, comparisonState.videoUrl, previews.compareLeft.emptyMessage);
+  setPreviewSource(previews.compareRight, comparisonState.videoUrl, previews.compareRight.emptyMessage);
 }
 
 function clearProcessPreviewState() {
@@ -567,21 +549,18 @@ function buildComparisonSessions() {
   const trace = getTraceById(comparisonState.traceId);
   const baselineSpec = getAlgorithmSpec(comparisonState.baselineAlgorithmId);
 
-  comparisonState.sodaSession = createAbrSession("soda", trace, comparisonState.leftUtilityProfile);
+  comparisonState.sodaSession = createAbrSession("soda", trace, comparisonState.utilityProfile);
   comparisonState.baselineSession = createAbrSession(
     comparisonState.baselineAlgorithmId,
     trace,
-    comparisonState.rightUtilityProfile
+    comparisonState.utilityProfile
   );
 
-  const leftUtilityCopy = comparisonState.leftUtilityProfile
-    ? `Left utility model: ${comparisonState.leftUtilityProfile.description}.`
-    : "Left utility model: generic bitrate-only utility.";
-  const rightUtilityCopy = comparisonState.rightUtilityProfile
-    ? `Right utility model: ${comparisonState.rightUtilityProfile.description}.`
-    : "Right utility model: generic bitrate-only utility.";
+  const utilityCopy = comparisonState.utilityProfile
+    ? `Shared comparison utility model: ${comparisonState.utilityProfile.description}.`
+    : "Shared comparison utility model: generic bitrate-only utility.";
 
-  ui.compareScenarioDescription.textContent = `${baselineSpec.description} ${trace.description} ${leftUtilityCopy} ${rightUtilityCopy}`;
+  ui.compareScenarioDescription.textContent = `${baselineSpec.description} ${trace.description} ${utilityCopy}`;
 
   clearComparisonPreviewState();
   renderAll();
@@ -752,95 +731,51 @@ async function handleProcessVideoSelection(event) {
   }
 }
 
-function clearComparisonVideo(side, { clearInput = true } = {}) {
-  if (side === "left") {
-    comparisonState.leftProfileRequestId += 1;
-    comparisonState.leftProfileLoading = false;
-    comparisonState.leftUtilityProfile = null;
-    comparisonState.leftVideoUrl = revokeVideoUrl(comparisonState.leftVideoUrl);
-    if (clearInput) {
-      ui.compareLeftVideoUpload.value = "";
-    }
-  } else {
-    comparisonState.rightProfileRequestId += 1;
-    comparisonState.rightProfileLoading = false;
-    comparisonState.rightUtilityProfile = null;
-    comparisonState.rightVideoUrl = revokeVideoUrl(comparisonState.rightVideoUrl);
-    if (clearInput) {
-      ui.compareRightVideoUpload.value = "";
-    }
+function clearComparisonVideo({ clearInput = true } = {}) {
+  comparisonState.profileRequestId += 1;
+  comparisonState.isProfileLoading = false;
+  comparisonState.utilityProfile = null;
+  comparisonState.videoUrl = revokeVideoUrl(comparisonState.videoUrl);
+  if (clearInput) {
+    ui.compareVideoUpload.value = "";
   }
-
   pauseComparisonLoop({ render: false });
   buildComparisonSessions();
 }
 
-async function handleComparisonVideoSelection(side, event) {
+async function handleComparisonVideoSelection(event) {
   const [file] = event.target.files ?? [];
   if (!file) {
     return;
   }
 
+  const requestId = ++comparisonState.profileRequestId;
+  comparisonState.isProfileLoading = true;
+  comparisonState.utilityProfile = null;
   pauseComparisonLoop({ render: false });
-
-  if (side === "left") {
-    const requestId = ++comparisonState.leftProfileRequestId;
-    comparisonState.leftProfileLoading = true;
-    comparisonState.leftUtilityProfile = null;
-    comparisonState.leftVideoUrl = revokeVideoUrl(comparisonState.leftVideoUrl);
-    comparisonState.leftVideoUrl = URL.createObjectURL(file);
-    syncComparisonPreviewSources();
-    renderAll();
-
-    try {
-      const profile = await analyzeLocalVideoSource({
-        url: comparisonState.leftVideoUrl,
-        fileName: file.name,
-        bitrateLadderMbps: BITRATE_LADDER_MBPS,
-      });
-
-      if (requestId !== comparisonState.leftProfileRequestId) {
-        return;
-      }
-
-      comparisonState.leftUtilityProfile = profile;
-    } finally {
-      if (requestId !== comparisonState.leftProfileRequestId) {
-        return;
-      }
-
-      comparisonState.leftProfileLoading = false;
-      buildComparisonSessions();
-    }
-    return;
-  }
-
-  const requestId = ++comparisonState.rightProfileRequestId;
-  comparisonState.rightProfileLoading = true;
-  comparisonState.rightUtilityProfile = null;
-  comparisonState.rightVideoUrl = revokeVideoUrl(comparisonState.rightVideoUrl);
-  comparisonState.rightVideoUrl = URL.createObjectURL(file);
+  comparisonState.videoUrl = revokeVideoUrl(comparisonState.videoUrl);
+  comparisonState.videoUrl = URL.createObjectURL(file);
   syncComparisonPreviewSources();
   renderAll();
 
   try {
     const profile = await analyzeLocalVideoSource({
-      url: comparisonState.rightVideoUrl,
+      url: comparisonState.videoUrl,
       fileName: file.name,
       bitrateLadderMbps: BITRATE_LADDER_MBPS,
     });
 
-    if (requestId !== comparisonState.rightProfileRequestId) {
+    if (requestId !== comparisonState.profileRequestId) {
       return;
     }
 
-    comparisonState.rightUtilityProfile = profile;
+    comparisonState.utilityProfile = profile;
   } finally {
-    if (requestId !== comparisonState.rightProfileRequestId) {
+    if (requestId !== comparisonState.profileRequestId) {
       return;
     }
 
-    comparisonState.rightProfileLoading = false;
+    comparisonState.isProfileLoading = false;
     buildComparisonSessions();
   }
 }
@@ -1072,7 +1007,7 @@ function renderComparisonShowdown() {
   ui.compareRightLabel.textContent = baselineSpec.label;
   ui.showdownTitle.textContent = `SODA vs ${baselineSpec.label} on ${trace.label}`;
   ui.showdownCopy.textContent =
-    "Both lanes replay the same trace under independent control-panel settings. Left uses SODA, right uses the selected baseline.";
+    "Both lanes replay the same uploaded video over the same trace timing. Left uses SODA, right uses the selected baseline.";
 
   renderPreview(
     previews.compareLeft,
@@ -1102,12 +1037,12 @@ function renderComparisonShowdown() {
   renderSummaryCards(
     ui.compareLeftSummary,
     leftSummary,
-    "Upload the left comparison video and start the showdown to populate this lane."
+    "Upload the shared comparison video and start the showdown to populate this lane."
   );
   renderSummaryCards(
     ui.compareRightSummary,
     rightSummary,
-    "Upload the right comparison video and start the showdown to populate this lane."
+    "Upload the shared comparison video and start the showdown to populate this lane."
   );
 }
 
@@ -1134,8 +1069,8 @@ function renderComparisonTable() {
 
   ui.comparisonTitle.textContent = `Paper-style comparison on ${selectedTrace.label}`;
   ui.comparisonCopy.textContent =
-    comparisonState.leftUtilityProfile || comparisonState.rightUtilityProfile
-      ? "Rows are ranked by paper QoE = mean utility - 10 x rebuffer ratio - switching rate. Uploaded comparison videos only change the live showdown summaries above."
+    comparisonState.utilityProfile
+      ? "Rows are ranked by paper QoE = mean utility - 10 x rebuffer ratio - switching rate. The shared uploaded comparison video only changes the live showdown summaries above."
       : "Rows are ranked by paper QoE = mean utility - 10 x rebuffer ratio - switching rate.";
 
   const highlightCards = [
@@ -1280,19 +1215,12 @@ async function init() {
   ui.compareStartBtn.addEventListener("click", startComparisonLoop);
   ui.comparePauseBtn.addEventListener("click", () => pauseComparisonLoop());
   ui.compareResetBtn.addEventListener("click", resetComparisonSession);
-  ui.compareLeftVideoUpload.addEventListener("change", (event) =>
-    handleComparisonVideoSelection("left", event)
-  );
-  ui.compareRightVideoUpload.addEventListener("change", (event) =>
-    handleComparisonVideoSelection("right", event)
-  );
-  ui.compareLeftClearBtn.addEventListener("click", () => clearComparisonVideo("left"));
-  ui.compareRightClearBtn.addEventListener("click", () => clearComparisonVideo("right"));
+  ui.compareVideoUpload.addEventListener("change", handleComparisonVideoSelection);
+  ui.compareClearVideoBtn.addEventListener("click", () => clearComparisonVideo());
 
   window.addEventListener("beforeunload", () => {
     processState.videoUrl = revokeVideoUrl(processState.videoUrl);
-    comparisonState.leftVideoUrl = revokeVideoUrl(comparisonState.leftVideoUrl);
-    comparisonState.rightVideoUrl = revokeVideoUrl(comparisonState.rightVideoUrl);
+    comparisonState.videoUrl = revokeVideoUrl(comparisonState.videoUrl);
   });
   window.addEventListener("resize", renderAll);
 }

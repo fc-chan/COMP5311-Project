@@ -38,7 +38,7 @@
         <button class="screen-tab" id="screen-tab-comparison" data-screen-target="comparison" type="button" aria-selected="false">
           <span>Interface 2</span>
           <strong>Comparison</strong>
-          <small>Use an independent control panel, upload two comparison videos, and review the side-by-side results.</small>
+          <small>Use an independent control panel, upload one comparison video, and review the side-by-side results.</small>
         </button>
       </div>
     </section>
@@ -48,9 +48,6 @@
         <article class="screen-intro-card">
           <p class="eyebrow">Interface 1</p>
           <h2>Upload, configure, and trace the playback process</h2>
-          <p class="charts-copy">
-            This screen merges the original setup and process-tracing views. The control panel below only affects this workspace.
-          </p>
         </article>
 
         <section class="control-card">
@@ -210,9 +207,6 @@
         <article class="screen-intro-card">
           <p class="eyebrow">Interface 2</p>
           <h2>Independent comparison workspace</h2>
-          <p class="charts-copy">
-            This screen has its own control panel. Its scenario, baseline algorithm, timers, and uploaded comparison videos do not affect the first workspace.
-          </p>
         </article>
 
         <section class="control-card comparison-control-card">
@@ -229,18 +223,13 @@
           <div class="comparison-upload-controls">
             <div class="compare-upload-grid">
               <label class="upload-label">
-                <span>Left video for SODA</span>
-                <input id="compare-left-video-upload" type="file" accept="video/*">
+                <span>Comparison video</span>
+                <input id="compare-video-upload" type="file" accept="video/*">
               </label>
-              <button id="compare-left-clear-btn" class="btn" type="button">Remove Left</button>
-              <label class="upload-label">
-                <span>Right video for baseline</span>
-                <input id="compare-right-video-upload" type="file" accept="video/*">
-              </label>
-              <button id="compare-right-clear-btn" class="btn" type="button">Remove Right</button>
+              <button id="compare-clear-btn" class="btn" type="button">Remove Video</button>
             </div>
             <p class="upload-hint" id="compare-upload-hint">
-              Upload two local videos. The left lane always uses SODA, the right lane follows the selected baseline, and these uploads only affect this comparison workspace.
+              Upload one local video. Both lanes reuse the same source: left for SODA, right for the selected baseline. This upload only affects this comparison workspace.
             </p>
           </div>
           <div class="controls">
@@ -258,7 +247,7 @@
               <h2 id="showdown-title">SODA against the selected baseline</h2>
             </div>
             <p class="charts-copy" id="showdown-copy">
-              Upload two local videos, then replay the same trace on both panes. The left lane stays on SODA and the right lane follows the selected baseline.
+              Upload one local video, then replay the same trace on both panes. The left lane stays on SODA and the right lane follows the selected baseline.
             </p>
           </div>
           <div class="showdown-grid">
@@ -270,11 +259,11 @@
               <div class="showdown-preview" id="compare-left-preview">
                 <video id="compare-left-video" playsinline muted preload="metadata"></video>
                 <div class="video-empty-state" id="compare-left-empty">
-                  Upload the left comparison video for SODA.
+                  Upload one comparison video to replay SODA.
                 </div>
                 <div class="video-quality-badge" id="compare-left-quality">No video loaded</div>
                 <div class="video-status-copy" id="compare-left-status">
-                  The left lane always replays SODA with its own uploaded video.
+                  The left lane replays SODA using the shared uploaded video.
                 </div>
                 <div class="video-stall-overlay" id="compare-left-stall">Rebuffering</div>
               </div>
@@ -289,11 +278,11 @@
               <div class="showdown-preview" id="compare-right-preview">
                 <video id="compare-right-video" playsinline muted preload="metadata"></video>
                 <div class="video-empty-state" id="compare-right-empty">
-                  Upload the right comparison video for the selected baseline.
+                  Upload one comparison video to replay the selected baseline.
                 </div>
                 <div class="video-quality-badge" id="compare-right-quality">Comparison waiting</div>
                 <div class="video-status-copy" id="compare-right-status">
-                  The right lane replays the selected baseline with its own uploaded video.
+                  The right lane replays the selected baseline using the shared uploaded video.
                 </div>
                 <div class="video-stall-overlay" id="compare-right-stall">Rebuffering</div>
               </div>
