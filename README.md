@@ -124,6 +124,8 @@ not in the precomputed batch table.
 
 The reproduced SODA controller follows the paper at a practical demo level:
 
+- throughput prediction from a 5-sample moving average of recent measured throughput
+- horizon forecast built as `[T, 0.97T, 0.94T, 0.91T, 0.88T]` with a 0.35 Mbps floor
 - a time-based objective over a 5-step prediction horizon
 - distortion minimization through bitrate-dependent cost
 - asymmetric buffer stabilization around a target level
